@@ -1,0 +1,17 @@
+# Build Artifacts
+build/
+bin/
+*.exe
+*.o
+*.lib
+*.dll
+*.a
+
+# IDE Settings
+.vscode/
+.idea/
+*.swp
+
+# OS Files
+.DS_Store
+Thumbs.db
