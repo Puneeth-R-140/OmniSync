@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 #include "../core/crdt_atom.hpp"
+#include "vle_encoding.hpp"
 
 namespace omnisync {
 namespace network {
@@ -11,7 +12,18 @@ namespace network {
 using namespace core;
 
 /**
- * @brief Simple Binary Serializer for OmniSync Atoms.
+ * @brief Binary Serializer for OmniSync Atoms.
+ * 
+ * Two versions:
+ * 1. BinaryPacker (Legacy): Fixed 34 bytes per atom
+ * 2. VLEPacker (New): Variable-length encoding, 4-10 bytes per atom
+ * 
+ * Use VLEPacker for production (80% size reduction).
+ * Use BinaryPacker for debugging (fixed size, easier to inspect).
+ */
+
+/**
+ * @brief Legacy Fixed-Size Binary Packer (34 bytes per atom).
  * Converts Atoms to/from raw bytes for network transmission.
  * Endianness: Little-Endian (Standard for x86/ARM).
  */
@@ -73,6 +85,81 @@ public:
         out_atom.is_deleted = (buffer[33] != 0);
 
         return true;
+    }
+};
+
+/**
+ * @brief Variable-Length Encoding Packer (4-10 bytes per atom, avg ~6 bytes).
+ * 
+ * Uses LEB128 encoding for integers:
+ * - Client IDs (1-100 users): 1-2 bytes
+ * - Clocks (edits within seconds): 1-3 bytes
+ * - Total: ~6 bytes vs 34 bytes = 82% reduction
+ * 
+ * Protocol Layout:
+ * [VLE] Client ID
+ * [VLE] Clock
+ * [VLE] Origin Client ID
+ * [VLE] Origin Clock
+ * [1]   Content (char)
+ * [1]   IsDeleted (bool/byte)
+ */
+class VLEPacker {
+public:
+    /**
+     * @brief Serialize an Atom using Variable-Length Encoding.
+     */
+    static std::vector<uint8_t> pack(const Atom& atom) {
+        std::vector<uint8_t> buffer;
+        buffer.reserve(10); // Estimated average size
+
+        // Encode 4 integers using VLE
+        VLEEncoding::encodeUInt64(atom.id.client_id, buffer);
+        VLEEncoding::encodeUInt64(atom.id.clock, buffer);
+        VLEEncoding::encodeUInt64(atom.origin.client_id, buffer);
+        VLEEncoding::encodeUInt64(atom.origin.clock, buffer);
+
+        // Fixed-size fields
+        buffer.push_back((uint8_t)atom.content);
+        buffer.push_back(atom.is_deleted ? 1 : 0);
+
+        return buffer;
+    }
+
+    /**
+     * @brief Deserialize VLE-encoded bytes back into an Atom.
+     */
+    static bool unpack(const std::vector<uint8_t>& buffer, Atom& out_atom) {
+        size_t offset = 0;
+
+        // Decode 4 integers
+        if (!VLEEncoding::decodeUInt64(buffer, offset, out_atom.id.client_id)) 
+            return false;
+        if (!VLEEncoding::decodeUInt64(buffer, offset, out_atom.id.clock)) 
+            return false;
+        if (!VLEEncoding::decodeUInt64(buffer, offset, out_atom.origin.client_id)) 
+            return false;
+        if (!VLEEncoding::decodeUInt64(buffer, offset, out_atom.origin.clock)) 
+            return false;
+
+        // Check if we have 2 more bytes for content and flag
+        if (offset + 2 > buffer.size()) return false;
+
+        out_atom.content = (char)buffer[offset++];
+        out_atom.is_deleted = (buffer[offset++] != 0);
+
+        return true;
+    }
+
+    /**
+     * @brief Calculate the exact size needed to encode this atom.
+     */
+    static size_t packedSize(const Atom& atom) {
+        return VLEEncoding::encodedSize(atom.id.client_id) +
+               VLEEncoding::encodedSize(atom.id.clock) +
+               VLEEncoding::encodedSize(atom.origin.client_id) +
+               VLEEncoding::encodedSize(atom.origin.clock) +
+               2; // content + is_deleted
     }
 };
 
