@@ -10,7 +10,7 @@
  *                               |___/           
  * 
  * OmniSync: A C++17 Header-Only CRDT Library
- * Copyright (c) 2026
+ * Copyright (c) 2026 Puneeth R
  * Licensed under the MIT License
  * 
  * Performance:
@@ -34,11 +34,11 @@
 namespace omnisync {
     // Official Release Version
     constexpr int VERSION_MAJOR = 1;
-    constexpr int VERSION_MINOR = 2;
+    constexpr int VERSION_MINOR = 3;
     constexpr int VERSION_PATCH = 0;
 
-    static const char* VERSION_STRING = "1.2.0";
-    static const char* VERSION_NAME = "Compression Champion";
+    static const char* VERSION_STRING = "1.3.0";
+    static const char* VERSION_NAME = "Memory Master";
 }
 
 #endif // OMNISYNC_HPP

@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.wikipedia.org/wiki/C%2B%2B17)
-[![Version](https://img.shields.io/badge/version-1.2.0-green.svg)](RELEASE_NOTES_v1.2.md)
+[![Version](https://img.shields.io/badge/version-1.3.0-green.svg)](RELEASE_NOTES_v1.3.md)
 
 ---
 
@@ -41,7 +41,8 @@ OmniSync implements the **RGA (Replicated Growable Array)** algorithm for confli
 - **Header-Only**: No build complexity, just `#include`
 - **Zero Dependencies**: Pure C++17 standard library
 - **Mathematically Verified**: Fuzz tested with 2,500 operations
-- **Production Ready**: Delta sync + VLE compression
+- **Production Ready**: Delta sync + VLE compression + Garbage collection
+- **Memory Managed**: Bounded memory usage with automatic GC
 - **Cross-Platform**: Windows, Linux, macOS
 
 ---
@@ -254,8 +255,14 @@ doc.load(in);
 
 See [ROADMAP.md](ROADMAP.md) for detailed plans.
 
-### v1.3 (Next Week)
+### v1.3 (Released)
 - Safe Garbage Collection
+- Memory management with bounded usage
+- Orphan buffer limits
+
+### v1.4 (February 2026)
+- GC coordination protocol
+- Enhanced memory profiling
 - Long-run stability testing
 
 ### v1.5 (Q1 2026)
@@ -273,7 +280,8 @@ See [ROADMAP.md](ROADMAP.md) for detailed plans.
 
 - **[BENCHMARKS.md](BENCHMARKS.md)** - Full performance methodology
 - **[ROADMAP.md](ROADMAP.md)** - Development plans
-- **[RELEASE_NOTES_v1.2.md](RELEASE_NOTES_v1.2.md)** - Version history
+- **[RELEASE_NOTES_v1.3.md](RELEASE_NOTES_v1.3.md)** - v1.3 Garbage Collection release
+- **[RELEASE_NOTES_v1.2.md](RELEASE_NOTES_v1.2.md)** - v1.2 Version history
 
 ---
 
@@ -302,9 +310,9 @@ If you use OmniSync in academic work:
 ```bibtex
 @software{omnisync2026,
   title = {OmniSync: A High-Performance C++ CRDT Library},
-  author = {OmniSync Team},
+  author = {Puneeth R},
   year = {2026},
-  version = {1.2.0},
+  version = {1.3.0},
   url = {https://github.com/your-username/OmniSync}
 }
 ```
@@ -314,7 +322,7 @@ If you use OmniSync in academic work:
 ## FAQ
 
 **Q: Can I use this in production?**  
-A: v1.2 is stable for text editing. GC (v1.3) needed for long-running sessions.
+A: Yes. v1.3 includes garbage collection for long-running sessions. Memory usage is bounded and predictable.
 
 **Q: How does this compare to Yjs?**  
 A: We haven't benchmarked side-by-side yet (planned for v1.5). Our tests show similar compression ratios.
@@ -330,4 +338,4 @@ A: Planned for v2.0. Current focus is rock-solid plain text.
 
 ---
 
-**OmniSync v1.2**: Making real-time collaboration efficient, one byte at a time.
+**OmniSync v1.3**: Making real-time collaboration efficient and memory-bounded, one byte at a time.

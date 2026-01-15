@@ -300,7 +300,7 @@ No hidden magic. Pure reproducible science.
 - ⚠️ Yjs comparison is theoretical (not tested)
 - ⚠️ Large-scale performance is untested
 
-**Signed**: OmniSync Development Team  
+**Signed**: Puneeth R  
 **Date**: January 10, 2026
 
 ---

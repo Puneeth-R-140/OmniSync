@@ -10,6 +10,7 @@
 #include "crdt_atom.hpp"
 #include "lamport_clock.hpp"
 #include "vector_clock.hpp"
+#include "memory_stats.hpp"
 
 namespace omnisync {
 namespace core {
@@ -25,6 +26,24 @@ namespace core {
  * - Delta Sync (90% bandwidth reduction)
  */
 class Sequence {
+public:
+    /**
+     * @brief Configuration for garbage collection behavior.
+     */
+    struct GCConfig {
+        bool auto_gc_enabled = false;      // Enable automatic GC
+        size_t tombstone_threshold = 1000; // Auto-GC trigger point
+        uint64_t min_age_threshold = 100;  // Keep recent operations (safety margin)
+    };
+    
+    /**
+     * @brief Configuration for orphan buffer management.
+     */
+    struct OrphanConfig {
+        size_t max_orphan_buffer_size = 10000; // Total orphans across all buffers
+        uint64_t max_orphan_age = 1000;        // Clock difference threshold
+    };
+
 private:
     uint64_t my_client_id;
     LamportClock clock;
@@ -41,6 +60,14 @@ private:
     
     // Phase 0.5: Delete Buffer
     std::unordered_set<OpID> pending_deletes;
+    
+    // Garbage Collection State
+    GCConfig gc_config;
+    size_t tombstone_count = 0;
+    
+    // Orphan Buffer State
+    OrphanConfig orphan_config;
+    size_t total_orphan_count = 0;
 
 public:
     Sequence(uint64_t client_id) : my_client_id(client_id), vector_clock(client_id) {
@@ -84,7 +111,13 @@ public:
 
         auto parent_map_it = atom_index.find(new_atom.origin);
         if (parent_map_it == atom_index.end()) {
+            // Orphan: parent doesn't exist yet
+            // Enforce buffer limits only
+            if (total_orphan_count >= orphan_config.max_orphan_buffer_size) {
+                evictOldOrphans();
+            }
             pending_orphans[new_atom.origin].push_back(new_atom);
+            total_orphan_count++;
             return;
         }
 
@@ -106,9 +139,16 @@ public:
         
         if (pending_deletes.count(new_atom.id)) {
             new_it->is_deleted = true;
+            tombstone_count++;
+            pending_deletes.erase(new_atom.id);
         }
         
         checkPendingOrphans(new_atom.id);
+        
+        // Auto-GC check
+        if (gc_config.auto_gc_enabled && tombstone_count >= gc_config.tombstone_threshold) {
+            garbageCollectLocal(gc_config.min_age_threshold);
+        }
     }
     
     OpID localDelete(size_t literal_index) {
@@ -132,6 +172,13 @@ public:
 
         if (found) {
             it->is_deleted = true;
+            tombstone_count++;
+            
+            // Auto-GC check
+            if (gc_config.auto_gc_enabled && tombstone_count >= gc_config.tombstone_threshold) {
+                garbageCollectLocal(gc_config.min_age_threshold);
+            }
+            
             return it->id;
         }
         return {0,0};
@@ -140,7 +187,10 @@ public:
     void remoteDelete(OpID target_id) {
         auto map_it = atom_index.find(target_id);
         if (map_it != atom_index.end()) {
-            map_it->second->is_deleted = true;
+            if (!map_it->second->is_deleted) {
+                map_it->second->is_deleted = true;
+                tombstone_count++;
+            }
         } else {
             pending_deletes.insert(target_id);
         }
@@ -207,13 +257,199 @@ public:
         vector_clock.merge(peer_clock);
     }
 
+    /**
+     * @brief Perform garbage collection using stable frontier from multiple peers.
+     * @param stable_frontier Minimum vector clock across all known peers
+     * @return Number of tombstones removed
+     * 
+     * This is the safe way to GC in a multi-user scenario. The stable frontier
+     * represents what ALL peers have seen, so any tombstone before this point
+     * can be safely deleted without breaking convergence.
+     */
+    size_t garbageCollect(const VectorClock& stable_frontier) {
+        std::vector<OpID> to_remove;
+        
+        for (const auto& atom : atoms) {
+            // Skip start node
+            if (atom.id.client_id == 0 && atom.id.clock == 0) continue;
+            
+            // Only remove tombstones
+            if (!atom.is_deleted) continue;
+            
+            // Check if this atom is before the stable frontier
+            uint64_t frontier_time = stable_frontier.get(atom.id.client_id);
+            if (atom.id.clock <= frontier_time) {
+                to_remove.push_back(atom.id);
+            }
+        }
+        
+        removeTombstones(to_remove);
+        return to_remove.size();
+    }
+    
+    /**
+     * @brief Simplified GC for single-user or manual scenarios.
+     * @param min_age_threshold Only delete tombs older than (current_clock - threshold)
+     * @return Number of tombstones removed
+     * 
+     * This provides a simple time-based GC that doesn't require tracking peer states.
+     * Useful for single-user applications or offline editing.
+     */
+    size_t garbageCollectLocal(uint64_t min_age_threshold) {
+        uint64_t current_time = clock.peek();
+        uint64_t safe_time = (current_time > min_age_threshold) ? 
+                             (current_time - min_age_threshold) : 0;
+        
+        std::vector<OpID> to_remove;
+        
+        for (const auto& atom : atoms) {
+            if (atom.id.client_id == 0 && atom.id.clock == 0) continue;
+            if (!atom.is_deleted) continue;
+            
+            // Only remove if clock is old enough
+            if (atom.id.clock <= safe_time) {
+                to_remove.push_back(atom.id);
+            }
+        }
+        
+        removeTombstones(to_remove);
+        return to_remove.size();
+    }
+    
+    /**
+     * @brief Configure garbage collection behavior.
+     */
+    void setGCConfig(const GCConfig& config) {
+        gc_config = config;
+    }
+    
+    /**
+     * @brief Get current GC configuration.
+     */
+    const GCConfig& getGCConfig() const {
+        return gc_config;
+    }
+    
+    /**
+     * @brief Configure orphan buffer management.
+     */
+    void setOrphanConfig(const OrphanConfig& config) {
+        orphan_config = config;
+    }
+    
+    /**
+     * @brief Get current orphan configuration.
+     */
+    const OrphanConfig& getOrphanConfig() const {
+        return orphan_config;
+    }
+    
+    /**
+     * @brief Get current memory usage statistics.
+     */
+    MemoryStats getMemoryStats() const {
+        MemoryStats stats;
+        
+        stats.atom_count = atoms.size();
+        stats.tombstone_count = tombstone_count;
+        stats.orphan_count = total_orphan_count;
+        stats.delete_buffer_count = pending_deletes.size();
+        
+        // Approximate memory calculations
+        stats.atom_list_bytes = atoms.size() * sizeof(Atom);
+        stats.index_map_bytes = atom_index.size() * (sizeof(OpID) + sizeof(void*) + 32); // Map overhead
+        stats.orphan_buffer_bytes = total_orphan_count * sizeof(Atom);
+        stats.vector_clock_bytes = vector_clock.getState().size() * 16;
+        
+        return stats;
+    }
+    
+    /**
+     * @brief Get total tombstone count.
+     */
+    size_t getTombstoneCount() const {
+        return tombstone_count;
+    }
+    
+    /**
+     * @brief Get total orphan buffer size.
+     */
+    size_t getOrphanBufferSize() const {
+        return total_orphan_count;
+    }
+
+
 private:
     void checkPendingOrphans(OpID just_inserted_id) {
         if (pending_orphans.count(just_inserted_id)) {
             std::vector<Atom> children = pending_orphans[just_inserted_id];
             pending_orphans.erase(just_inserted_id);
+            total_orphan_count -= children.size();
             for(const auto& child : children) {
                 remoteMerge(child);
+            }
+        }
+    }
+    
+    /**
+     * @brief Actually remove tombstones from all data structures.
+     */
+    void removeTombstones(const std::vector<OpID>& to_remove) {
+        for (const auto& id : to_remove) {
+            auto map_it = atom_index.find(id);
+            if (map_it != atom_index.end()) {
+                atoms.erase(map_it->second);
+                atom_index.erase(map_it);
+                tombstone_count--;
+            }
+        }
+    }
+    
+    /**
+     * @brief Determine if an orphan should be accepted into the buffer.
+     */
+    bool shouldAcceptOrphan(const Atom& atom) const {
+        uint64_t current_time = clock.peek();
+        if (atom.id.clock < current_time && 
+            (current_time - atom.id.clock) > orphan_config.max_orphan_age) {
+            return false;
+        }
+        return true;
+    }
+    
+    /**
+     * @brief Evict old orphans when buffer is full.
+     */
+    void evictOldOrphans() {
+        if (pending_orphans.empty()) return;
+        
+        std::vector<std::pair<uint64_t, OpID>> orphan_ages;
+        for (const auto& [parent_id, children] : pending_orphans) {
+            for (const auto& orphan : children) {
+                orphan_ages.push_back({orphan.id.clock, parent_id});
+            }
+        }
+        
+        std::sort(orphan_ages.begin(), orphan_ages.end());
+        
+        size_t to_evict = std::max(size_t(1), orphan_ages.size() / 10);
+        
+        for (size_t i = 0; i < to_evict && i < orphan_ages.size(); i++) {
+            OpID parent_id = orphan_ages[i].second;
+            if (pending_orphans.count(parent_id) && !pending_orphans[parent_id].empty()) {
+                auto& children = pending_orphans[parent_id];
+                
+                auto oldest_it = std::min_element(children.begin(), children.end(),
+                    [](const Atom& a, const Atom& b) { return a.id.clock < b.id.clock; });
+                
+                if (oldest_it != children.end()) {
+                    children.erase(oldest_it);
+                    total_orphan_count--;
+                    
+                    if (children.empty()) {
+                        pending_orphans.erase(parent_id);
+                    }
+                }
             }
         }
     }
