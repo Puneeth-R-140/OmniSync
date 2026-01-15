@@ -33,7 +33,7 @@ struct MemoryStats {
     }
     
     /**
-     * @brief Print human-readable statistics to stdout.
+     * @brief Print statistics to stdout.
      */
     void print() const {
         std::cout << "Memory Statistics:" << std::endl;

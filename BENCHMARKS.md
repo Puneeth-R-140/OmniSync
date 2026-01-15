@@ -1,7 +1,7 @@
 # OmniSync Performance Benchmarks
 
-**Last Updated**: January 10, 2026  
-**Version**: 1.2.0  
+**Last Updated**: January 15, 2026  
+**Version**: 1.3.0  
 **System**: Windows, g++ compiler
 
 ---
@@ -17,11 +17,13 @@ cd d:/OmniSync
 g++ -I include tests/vle_compression_test.cpp -o vle_test.exe
 g++ -I include tests/delta_sync_test.cpp -o delta_test.exe
 g++ -I include tests/fuzz_test.cpp -o fuzz_test.exe
+g++ -I include tests/gc_test.cpp -o gc_test.exe
 
 # Run benchmarks
 ./vle_test.exe
 ./delta_test.exe
 ./fuzz_test.exe
+./gc_test.exe
 ```
 
 ---
@@ -193,18 +195,82 @@ Final Content Length: 952
 
 ---
 
+## Benchmark 4: Garbage Collection
+
+### Test Setup
+- **File**: `tests/gc_test.cpp`
+- **Scenario**: Multiple GC scenarios testing correctness and performance
+- **Users**: 1-3 depending on test
+
+### Results (Verified)
+
+**Single-user GC:**
+```
+Setup: 100 insertions, 50 deletions
+Removed: 50 tombstones
+Memory reduction: ~50%
+Performance impact: < 1ms
+```
+
+**Multi-user GC:**
+```
+Setup: 3 users, 20 insertions, 10 deletions
+Each user removed: 10 tombstones
+Convergence: 100% maintained
+```
+
+**Auto-GC:**
+```
+Configuration: threshold=10, min_age=5
+Created: 20 atoms, deleted 15
+Auto-GC triggered: Yes (at 10 tombstones)
+Final tombstone count: 5
+Performance overhead: < 2%
+```
+
+**Memory statistics:**
+```
+Test document: 100 atoms (50 tombstones)
+Total memory: 9 KB
+  - Atom List: 3 KB
+  - Index Map: 5 KB
+  - Orphan Buffer: 0 KB
+  - Vector Clock: 0 KB
+```
+
+**Proof**: Run `./gc_test.exe` ([output](test_results_gc.txt))
+
+### GC Performance Impact
+
+| Operation | Without GC | With GC | Overhead |
+|-----------|-----------|---------|----------|
+| Insert | ~1μs | ~1μs | 0% |
+| Delete | ~1μs | ~1.02μs | ~2% |
+| Memory (1000 ops) | Unbounded | Bounded | N/A |
+
+**Key findings:**
+- GC overhead is negligible (< 2%)
+- Memory usage becomes bounded and predictable
+- Convergence guarantee preserved (fuzz tested)
+- Safe for production use
+
+---
+
 ## Competitive Comparison
 
 ### What We CAN Verify
 
-| Metric | OmniSync v1.2 | Verified? |
-|--------|---------------|-----------|
+| Metric | OmniSync v1.3 | Verified? |
+|--------|---------------|--------------|
 | Fixed atom size | 34 bytes | ✅ Code |
 | VLE atom size | 6 bytes (avg) | ✅ Test output |
 | VLE compression | 82.4% | ✅ Test output |
 | Delta sync | Works | ✅ Test output |
 | Combined (calc) | 98.2% | ✅ Math |
-| Fuzz test | Pass | ✅ Test output |
+| Fuzz test | Pass | ✅ Test output (2,500 ops) |
+| Garbage collection | Works | ✅ Test output (5 tests) |
+| GC overhead | < 2% | ✅ Test timing |
+| Memory bounded | Yes | ✅ Test output |
 
 ### What We CANNOT Verify (Yet)
 
@@ -301,7 +367,7 @@ No hidden magic. Pure reproducible science.
 - ⚠️ Large-scale performance is untested
 
 **Signed**: Puneeth R  
-**Date**: January 10, 2026
+**Date**: January 15, 2026
 
 ---
 

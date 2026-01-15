@@ -102,7 +102,7 @@ int main() {
     // They should converge (order determined by OpID)
     assert(alice.toString() == bob.toString());
     
-    std::cout << "\n✅ SUCCESS: Delta Sync Verified!\n";
+    std::cout << "\nSUCCESS: Delta Sync Verified!\n";
     std::cout << "   - 90%+ bandwidth reduction achieved\n";
     std::cout << "   - Concurrent edits merged correctly\n";
     std::cout << "   - Full convergence maintained\n";

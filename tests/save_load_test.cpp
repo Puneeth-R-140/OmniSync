@@ -58,6 +58,6 @@ int main() {
     std::cout << "Doc2 Modified: " << doc2.toString() << "\n";
     assert(doc2.toString() == "ACD");
 
-    std::cout << "✅ SUCCESS: Save/Load Verified.\n";
+    std::cout << "SUCCESS: Save/Load Verified.\n";
     return 0;
 }

@@ -123,10 +123,10 @@ int main() {
     }
 
     if (all_match) {
-        std::cout << "✅ SUCCESS: All " << NUM_USERS << " users converged identically.\n";
+        std::cout << "SUCCESS: All " << NUM_USERS << " users converged identically.\n";
         std::cout << "Final Content Length: " << golden.length() << "\n";
     } else {
-        std::cout << "❌ FAILURE: Consistency broken.\n";
+        std::cout << "FAILURE: Consistency broken.\n";
         return 1;
     }
 

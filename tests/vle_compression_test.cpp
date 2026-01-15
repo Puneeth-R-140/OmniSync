@@ -44,7 +44,7 @@ void testVLEBasics() {
         assert(decoded == val);
     }
     
-    std::cout << "\n✅ VLE encoding/decoding works correctly\n\n";
+    std::cout << "\nVLE encoding/decoding works correctly\n\n";
 }
 
 void testAtomCompression() {
@@ -108,7 +108,7 @@ void testAtomCompression() {
     std::cout << "Average VLE size:    " << std::fixed << std::setprecision(1) 
               << avg_vle << " bytes/atom\n";
     
-    std::cout << "\n✅ VLE achieves " << std::fixed << std::setprecision(0) 
+    std::cout << "\nVLE achieves " << std::fixed << std::setprecision(0) 
               << reduction_pct << "% compression\n\n";
 }
 
@@ -137,7 +137,7 @@ void testWorstCase() {
     assert(VLEPacker::unpack(vle, unpacked));
     assert(unpacked.id == large_atom.id);
     
-    std::cout << "\n✅ VLE handles edge cases correctly\n\n";
+    std::cout << "\nVLE handles edge cases correctly\n\n";
 }
 
 void testCombinedBenefit() {
@@ -167,7 +167,7 @@ void testCombinedBenefit() {
               << "(" << 100.0 * (original_bandwidth - delta_vle_bandwidth) / original_bandwidth 
               << "% reduction)\n";
     
-    std::cout << "\n💎 Combined optimization: " 
+    std::cout << "\nCombined optimization: " 
               << (original_bandwidth / delta_vle_bandwidth) << "x smaller!\n\n";
 }
 
@@ -180,7 +180,7 @@ int main() {
     testCombinedBenefit();
     
     std::cout << "========================================\n";
-    std::cout << "✅ ALL VLE TESTS PASSED\n";
+    std::cout << "ALL VLE TESTS PASSED\n";
     std::cout << "========================================\n";
     std::cout << "\nKey Achievements:\n";
     std::cout << "  - VLE encoding: 80%+ compression\n";

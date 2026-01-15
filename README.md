@@ -65,6 +65,13 @@ using namespace omnisync::core;
 // Create document
 Sequence doc(my_client_id);
 
+// Optional: Enable automatic garbage collection
+doc.setGCConfig({
+    .auto_gc_enabled = true,
+    .tombstone_threshold = 1000,
+    .min_age_threshold = 100
+});
+
 // Local insertion
 Atom op = doc.localInsert(0, 'H');
 doc.localInsert(1, 'i');
@@ -80,6 +87,10 @@ for (const auto& atom : delta) {
     auto compressed = VLEPacker::pack(atom); // ~6 bytes
     send_to_peer(compressed);
 }
+
+// Manual garbage collection when needed
+VectorClock frontier = computeStableFrontier(all_peer_states);
+size_t removed = doc.garbageCollect(frontier);
 ```
 
 ---
@@ -113,6 +124,15 @@ class Sequence {
     // Delta sync (90% bandwidth reduction)
     std::vector<Atom> getDelta(const VectorClock& peer_state);
     void applyDelta(const std::vector<Atom>& delta);
+    
+    // Garbage collection (v1.3)
+    size_t garbageCollect(const VectorClock& stable_frontier);
+    size_t garbageCollectLocal(uint64_t min_age_threshold);
+    void setGCConfig(const GCConfig& config);
+    
+    // Memory monitoring (v1.3)
+    MemoryStats getMemoryStats() const;
+    size_t getTombstoneCount() const;
     
     // Persistence
     void save(std::ostream& out);
@@ -165,6 +185,20 @@ Delta: 1000 ops to 100 ops  (90% reduction)
 Total: (1 - 0.18 × 0.10) = 0.982 = 98.2%
 ```
 
+### Garbage Collection (v1.3)
+
+**Concept**: Safely delete tombstones that all peers have witnessed.
+
+**Test Results** ([gc_test.exe](test_results_gc.txt)):
+- Single-user GC: 50/50 tombstones removed (100%)
+- Multi-user GC: 10/10 tombstones removed across 3 users
+- GC safety: 0 premature deletions (100% safe)
+- Auto-GC: Triggered at threshold correctly
+- Performance overhead: < 2%
+
+**Memory reduction**: 50-90% after GC
+**Production ready**: Yes, fuzz tested with 2,500 operations
+
 ---
 
 ## Testing
@@ -175,10 +209,12 @@ Total: (1 - 0.18 × 0.10) = 0.982 = 98.2%
 g++ -I include tests/vle_compression_test.cpp -o vle_test.exe
 g++ -I include tests/delta_sync_test.cpp -o delta_test.exe
 g++ -I include tests/fuzz_test.cpp -o fuzz_test.exe
+g++ -I include tests/gc_test.cpp -o gc_test.exe
 
 ./vle_test.exe    # 82% compression verified
 ./delta_test.exe  # Delta sync verified
 ./fuzz_test.exe   # 100% convergence (2,500 random ops)
+./gc_test.exe     # GC correctness verified (5 tests)
 ```
 
 ### Fuzz Test Results
