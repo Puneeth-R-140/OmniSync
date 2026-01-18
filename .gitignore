@@ -7,6 +7,9 @@ bin/
 *.dll
 *.a
 
+#sample apps used for test I will make it public later as I did not tested it against v1.3
+examples/
+
 # IDE Settings
 .vscode/
 .idea/

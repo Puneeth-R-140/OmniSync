@@ -1,7 +1,7 @@
 # OmniSync v1.2 Release Notes
 
 **Release Date**: January 10, 2026  
-**Version**: 1.2.0 "Compression Champion"
+**Version**: 1.2.0 "Compression Improvement"
 
 ---
 
