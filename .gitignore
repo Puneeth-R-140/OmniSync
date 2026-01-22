@@ -7,7 +7,7 @@ bin/
 *.dll
 *.a
 
-#sample apps used for test I will make it public later as I did not tested it against v1.3
+#sample apps used for test I will make it public later as I did not tested it against new version
 examples/
 
 # IDE Settings

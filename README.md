@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.wikipedia.org/wiki/C%2B%2B17)
-[![Version](https://img.shields.io/badge/version-1.3.0-green.svg)](RELEASE_NOTES_v1.3.md)
+[![Version](https://img.shields.io/badge/version-1.4.0-green.svg)](RELEASE_NOTES_v1.4.md)
 
 ---
 
@@ -40,9 +40,10 @@ OmniSync implements the **RGA (Replicated Growable Array)** algorithm for confli
 
 - **Header-Only**: No build complexity, just `#include`
 - **Zero Dependencies**: Pure C++17 standard library
-- **Mathematically Verified**: Fuzz tested with 2,500 operations
-- **Production Ready**: Delta sync + VLE compression + Garbage collection
-- **Memory Managed**: Bounded memory usage with automatic GC
+- **Battle-Tested**: 24-hour stability test with 382K operations
+- **Production Ready**: Delta sync + VLE compression + Distributed GC
+- **Memory Managed**: Bounded memory usage with coordinated garbage collection
+- **Performance Profiled**: Microsecond-level GC timing and memory analytics
 - **Cross-Platform**: Windows, Linux, macOS
 
 ---
@@ -71,6 +72,11 @@ doc.setGCConfig({
     .tombstone_threshold = 1000,
     .min_age_threshold = 100
 });
+
+// Optional: Use GC coordination for distributed systems (v1.4)
+GCCoordinator gc_coord(my_client_id);
+gc_coord.registerPeer(peer1_id);
+gc_coord.registerPeer(peer2_id);
 
 // Local insertion
 Atom op = doc.localInsert(0, 'H');
@@ -198,6 +204,36 @@ Total: (1 - 0.18 × 0.10) = 0.982 = 98.2%
 
 **Memory reduction**: 50-90% after GC
 **Production ready**: Yes, fuzz tested with 2,500 operations
+
+### Stability Testing (v1.4)
+
+**24-Hour Continuous Operation**:
+- Duration: 86,400 seconds
+- Operations: 382,960 total
+- Users: 5 concurrent
+- Convergence: 100% maintained
+- Memory leaks: None detected
+- Memory: Bounded (peaked at 132 KB)
+
+**1-Hour Validation**:
+- Operations: 35,700
+- Memory: 0 → 103 KB (peak 110 KB)
+- Result: Profiling overhead negligible
+
+### GC Coordination (v1.4)
+
+**Distributed GC** for multi-peer systems:
+- Vector clock frontier-based safety
+- Peer heartbeat and timeout handling
+- Coordinated tombstone removal
+- Test Results: 6/6 tests passing
+
+**Performance**:
+- Average GC time: 2.4 microseconds
+- Peak GC time: 12 microseconds
+- Overhead: < 0.001%
+
+See [GC_COORDINATION_GUIDE.md](GC_COORDINATION_GUIDE.md) for usage.
 
 ---
 

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <iostream>
 #include <cstring> 
+#include <chrono>
 #include "crdt_atom.hpp"
 #include "lamport_clock.hpp"
 #include "vector_clock.hpp"
@@ -68,6 +69,9 @@ private:
     // Orphan Buffer State
     OrphanConfig orphan_config;
     size_t total_orphan_count = 0;
+    
+    // GC Performance Tracking
+    MemoryStats::GCStats gc_stats_;
 
 public:
     Sequence(uint64_t client_id) : my_client_id(client_id), vector_clock(client_id) {
@@ -267,6 +271,8 @@ public:
      * can be safely deleted without breaking convergence.
      */
     size_t garbageCollect(const VectorClock& stable_frontier) {
+        auto start = std::chrono::steady_clock::now();
+        
         std::vector<OpID> to_remove;
         
         for (const auto& atom : atoms) {
@@ -284,6 +290,12 @@ public:
         }
         
         removeTombstones(to_remove);
+        
+        // Record GC performance
+        auto end = std::chrono::steady_clock::now();
+        auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        gc_stats_.recordGCRun(duration_us, to_remove.size());
+        
         return to_remove.size();
     }
     
@@ -296,6 +308,8 @@ public:
      * Useful for single-user applications or offline editing.
      */
     size_t garbageCollectLocal(uint64_t min_age_threshold) {
+        auto start = std::chrono::steady_clock::now();
+        
         uint64_t current_time = clock.peek();
         uint64_t safe_time = (current_time > min_age_threshold) ? 
                              (current_time - min_age_threshold) : 0;
@@ -313,6 +327,12 @@ public:
         }
         
         removeTombstones(to_remove);
+        
+        // Record GC performance
+        auto end = std::chrono::steady_clock::now();
+        auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        gc_stats_.recordGCRun(duration_us, to_remove.size());
+        
         return to_remove.size();
     }
     
@@ -360,6 +380,9 @@ public:
         stats.index_map_bytes = atom_index.size() * (sizeof(OpID) + sizeof(void*) + 32); // Map overhead
         stats.orphan_buffer_bytes = total_orphan_count * sizeof(Atom);
         stats.vector_clock_bytes = vector_clock.getState().size() * 16;
+        
+        // Copy GC performance stats
+        stats.gc_stats = gc_stats_;
         
         return stats;
     }

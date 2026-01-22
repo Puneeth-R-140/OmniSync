@@ -25,6 +25,7 @@
 #include "core/lamport_clock.hpp"
 #include "core/vector_clock.hpp"
 #include "core/sequence.hpp"
+#include "core/gc_coordinator.hpp"
 
 // Network Helpers
 #include "network/vle_encoding.hpp"
@@ -34,11 +35,11 @@
 namespace omnisync {
     // Official Release Version
     constexpr int VERSION_MAJOR = 1;
-    constexpr int VERSION_MINOR = 3;
+    constexpr int VERSION_MINOR = 4;
     constexpr int VERSION_PATCH = 0;
 
-    static const char* VERSION_STRING = "1.3.0";
-    static const char* VERSION_NAME = "Memory Master";
+    static const char* VERSION_STRING = "1.4.0";
+    static const char* VERSION_NAME = "Stability Master";
 }
 
 #endif // OMNISYNC_HPP
