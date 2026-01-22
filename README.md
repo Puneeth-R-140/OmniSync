@@ -267,21 +267,6 @@ Result: SUCCESS - All 5 users converged identically.
 
 ---
 
-## Examples
-
-### P2P Chat (Real-time collaboration)
-
-```bash
-# Terminal 1
-g++ -I include examples/p2p_chat.cpp -o chat.exe -lws2_32
-./chat.exe 1 8000 8001
-
-# Terminal 2  
-./chat.exe 2 8001 8000
-
-# Type in either terminal - text appears in both
-```
-
 ### Save/Load Document
 
 ```cpp
