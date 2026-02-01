@@ -146,6 +146,46 @@ class Sequence {
 };
 ```
 
+## Examples
+
+OmniSync includes several examples demonstrating different features:
+
+### Basic Usage
+[`examples/basic_usage.cpp`](examples/basic_usage.cpp) - Start here to learn the fundamentals:
+- Creating documents and users
+- Local insert and delete operations  
+- Remote merging and synchronization
+- Convergence verification
+- Basic garbage collection
+
+### Delta Synchronization
+[`examples/delta_sync_demo.cpp`](examples/delta_sync_demo.cpp) - Efficient network synchronization:
+- Full sync vs delta sync comparison
+- VLE compression on top of deltas
+- Bandwidth optimization (98%+ reduction)
+- Real-world sync scenarios
+
+### Memory Profiling
+[`examples/memory_profiling_demo.cpp`](examples/memory_profiling_demo.cpp) - v1.4 profiling features:
+- Memory statistics tracking
+- GC performance measurement (microsecond-level)
+- Auto-GC configuration and testing
+- Performance overhead analysis
+
+### Persistence
+[`examples/save_load_demo.cpp`](examples/save_load_demo.cpp) - Document persistence:
+- Saving CRDT state to disk
+- Loading and verifying integrity
+- Continuing operations after load
+- Binary file format
+
+### Distributed GC Coordination
+[`examples/distributed_gc_example.cpp`](examples/distributed_gc_example.cpp) - v1.4 GC coordination:
+- Multi-peer GC coordination
+- Vector clock frontier computation
+- Heartbeat and peer management
+- Safe distributed tombstone removal
+
 ---
 
 ## Performance Deep Dive
