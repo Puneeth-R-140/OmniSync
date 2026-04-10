@@ -15,7 +15,7 @@ int main() {
     // Create atoms
     std::cout << "Creating 100 atoms..." << std::endl;
     for (int i = 0; i < 100; i++) {
-        doc.localInsert(i, 'A' + (i % 26));
+           doc.localInsert(i, static_cast<char>('A' + (i % 26)));
     }
     
     // Delete 50 to create tombstones

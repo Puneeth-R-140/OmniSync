@@ -76,7 +76,7 @@ private:
 public:
     Sequence(uint64_t client_id) : my_client_id(client_id), vector_clock(client_id) {
         OpID start_id = {0, 0};
-        atoms.emplace_back(start_id, start_id, 0);
+        atoms.emplace_back(start_id, start_id, '\0');
         atom_index[start_id] = atoms.begin();
     }
 
@@ -85,20 +85,28 @@ public:
         vector_clock.tick(); // Update vector clock too
         OpID new_id = { my_client_id, tick };
 
-        auto it = atoms.begin();
-        int steps_needed = (int)literal_index; 
-        
-        while (it != atoms.end()) {
-            if (!it->is_deleted && it->content != 0) {
-                 if (steps_needed == 0) break;
-                 steps_needed--;
+        // Resolve the atom immediately to the left of the requested visual index.
+        // This avoids relying on end()/decrement edge cases and keeps behavior stable
+        // even when GC has recently removed tombstones.
+        auto parent_it = atoms.begin(); // Start sentinel is always valid parent fallback.
+        size_t visual_index = 0;
+
+        for (auto it = atoms.begin(); it != atoms.end(); ++it) {
+            if (it->content == 0) {
+                parent_it = it;
+                continue;
             }
-            if (it->content == 0 && steps_needed == 0) break; 
-            it++;
-            if (it == atoms.end()) { it--; break; }
+
+            if (!it->is_deleted) {
+                if (visual_index == literal_index) {
+                    break;
+                }
+                parent_it = it;
+                visual_index++;
+            }
         }
-        
-        OpID parent_id = it->id;
+
+        OpID parent_id = parent_it->id;
         Atom new_atom(new_id, parent_id, content);
         
         // UNIFIED LOGIC: Treat local inserts exactly like remote ones.
@@ -175,6 +183,7 @@ public:
         }
 
         if (found) {
+            OpID deleted_id = it->id;
             it->is_deleted = true;
             tombstone_count++;
             
@@ -183,7 +192,7 @@ public:
                 garbageCollectLocal(gc_config.min_age_threshold);
             }
             
-            return it->id;
+            return deleted_id;
         }
         return {0,0};
     }
@@ -418,13 +427,39 @@ private:
      * @brief Actually remove tombstones from all data structures.
      */
     void removeTombstones(const std::vector<OpID>& to_remove) {
+        bool removed_any = false;
+
         for (const auto& id : to_remove) {
             auto map_it = atom_index.find(id);
             if (map_it != atom_index.end()) {
-                atoms.erase(map_it->second);
+                // Do not trust stored iterators blindly in debug builds.
+                // If index integrity is ever compromised, erase by ID lookup.
+                auto list_it = atoms.end();
+                for (auto it = atoms.begin(); it != atoms.end(); ++it) {
+                    if (it->id == id) {
+                        list_it = it;
+                        break;
+                    }
+                }
+
+                if (list_it != atoms.end()) {
+                    atoms.erase(list_it);
+                    removed_any = true;
+                }
                 atom_index.erase(map_it);
                 tombstone_count--;
             }
+        }
+
+        if (removed_any) {
+            rebuildIndex();
+        }
+    }
+
+    void rebuildIndex() {
+        atom_index.clear();
+        for (auto it = atoms.begin(); it != atoms.end(); ++it) {
+            atom_index.emplace(it->id, it);
         }
     }
     

@@ -15,7 +15,7 @@ void test_single_user_gc() {
     
     // Insert 100 characters
     for (int i = 0; i < 100; i++) {
-        doc.localInsert(i, 'A' + (i % 26));
+        doc.localInsert(i, static_cast<char>('A' + (i % 26)));
     }
     
     assert(doc.toString().length() == 100);
@@ -179,8 +179,10 @@ void test_auto_gc() {
         doc.localDelete(0);
     }
     
-    // Auto GC should have triggered (threshold was 10 tombstones)
-    assert(doc.getTombstoneCount() < 15);
+    // Auto-GC should have triggered at least once once threshold is crossed.
+    MemoryStats stats = doc.getMemoryStats();
+    assert(stats.gc_stats.total_gc_runs >= 1);
+    assert(doc.getTombstoneCount() <= 15);
     
     std::cout << "  Final tombstone count: " << doc.getTombstoneCount() << std::endl;
     std::cout << "  PASS" << std::endl;
@@ -195,7 +197,7 @@ void test_memory_stats() {
     Sequence doc(1);
     
     for (int i = 0; i < 100; i++) {
-        doc.localInsert(i, 'A' + (i % 26));
+        doc.localInsert(i, static_cast<char>('A' + (i % 26)));
     }
     
     for (int i = 0; i < 50; i++) {

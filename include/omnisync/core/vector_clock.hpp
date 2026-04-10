@@ -110,7 +110,6 @@ public:
      * @brief Check if this clock is concurrent with other.
      */
     bool isConcurrent(const VectorClock& other) const {
-        int cmp = compare(other);
         // Concurrent means neither < nor > nor ==
         bool this_less = false, this_greater = false;
         
@@ -176,7 +175,7 @@ public:
      * @brief Serialize to binary stream.
      */
     void save(std::ostream& out) const {
-        uint32_t count = clock.size();
+        uint32_t count = static_cast<uint32_t>(clock.size());
         out.write((char*)&count, sizeof(count));
         
         for (const auto& [id, time] : clock) {

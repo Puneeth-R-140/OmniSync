@@ -55,7 +55,7 @@ void test_stable_frontier() {
     
     // User 1 creates text
     for (int i = 0; i < 10; i++) {
-        Atom a = user1.localInsert(i, 'A' + i);
+        Atom a = user1.localInsert(i, static_cast<char>('A' + i));
         user2.remoteMerge(a);
         user3.remoteMerge(a);
     }

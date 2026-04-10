@@ -205,8 +205,9 @@ int main(int argc, char* argv[]) {
     // Random number generator
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<> user_dist(0, config.num_users - 1);
+    std::uniform_int_distribution<size_t> user_dist(0, config.num_users - 1);
     std::uniform_int_distribution<> op_dist(0, 1);  // 0=insert, 1=delete
+    std::uniform_int_distribution<int> char_dist(0, 25);
     
     // Timing
     auto test_start = std::chrono::steady_clock::now();
@@ -234,7 +235,7 @@ int main(int argc, char* argv[]) {
             if (op_dist(gen) == 0 || user.toString().empty()) {
                 // Insert
                 size_t pos = user.toString().length();
-                char ch = 'A' + (rand() % 26);
+                char ch = static_cast<char>('A' + char_dist(gen));
                 Atom atom = user.localInsert(pos, ch);
                 
                 // Broadcast to other users
@@ -247,7 +248,8 @@ int main(int argc, char* argv[]) {
                 // Delete
                 size_t len = user.toString().length();
                 if (len > 0) {
-                    size_t pos = rand() % len;
+                    std::uniform_int_distribution<size_t> pos_dist(0, len - 1);
+                    size_t pos = pos_dist(gen);
                     OpID deleted = user.localDelete(pos);
                     
                     // Broadcast
@@ -263,17 +265,18 @@ int main(int argc, char* argv[]) {
         }
         
         // Snapshot
-        if (std::chrono::duration_cast<std::chrono::seconds>(now - last_snapshot).count() 
-            >= config.snapshot_interval_seconds) {
+        const size_t snapshot_elapsed_s = static_cast<size_t>(
+            std::chrono::duration_cast<std::chrono::seconds>(now - last_snapshot).count());
+        if (snapshot_elapsed_s >= config.snapshot_interval_seconds) {
             monitor.recordSnapshot(*users[0]);
             checkpoint_count++;
             last_snapshot = now;
         }
         
         // Manual GC (if auto-GC is disabled)
-        if (!config.enable_auto_gc && 
-            std::chrono::duration_cast<std::chrono::seconds>(now - last_gc).count() 
-            >= config.gc_interval_seconds) {
+        const size_t gc_elapsed_s = static_cast<size_t>(
+            std::chrono::duration_cast<std::chrono::seconds>(now - last_gc).count());
+        if (!config.enable_auto_gc && gc_elapsed_s >= config.gc_interval_seconds) {
             for (auto& user : users) {
                 user->garbageCollectLocal(100);
             }
@@ -284,7 +287,7 @@ int main(int argc, char* argv[]) {
         // Progress report every minute
         if (std::chrono::duration_cast<std::chrono::seconds>(now - last_progress).count() >= 60) {
             auto elapsed = std::chrono::duration_cast<std::chrono::hours>(now - test_start);
-            std::cout << "Progress: " << elapsed.count() << "h / " << config.duration_hours << "h "
+            std::cout << "Progress: " << static_cast<size_t>(elapsed.count()) << "h / " << config.duration_hours << "h "
                      << "(Memory: " << users[0]->getMemoryStats().total_bytes() / 1024 << " KB, "
                      << "Tombstones: " << users[0]->getTombstoneCount() << ")\n";
             last_progress = now;

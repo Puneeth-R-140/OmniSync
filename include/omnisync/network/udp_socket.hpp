@@ -1,6 +1,12 @@
 #pragma once
 
 #ifdef _WIN32
+    #ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+    #endif
+    #ifndef NOMINMAX
+    #define NOMINMAX
+    #endif
     #include <winsock2.h>
     #include <ws2tcpip.h>
     #pragma comment(lib, "ws2_32.lib")
@@ -18,13 +24,19 @@
 namespace omnisync {
 namespace network {
 
+#ifdef _WIN32
+using SocketHandle = SOCKET;
+#else
+using SocketHandle = int;
+#endif
+
 /**
  * @brief Simple Cross-Platform UDP Socket Wrapper.
  * Hides the ugly C-style socket API behind a clean C++ class.
  */
 class UdpSocket {
 private:
-    uint64_t sock;
+    SocketHandle sock;
     bool is_valid;
     struct sockaddr_in my_addr;
 
@@ -35,7 +47,11 @@ public:
         WSAStartup(MAKEWORD(2, 2), &wsa);
 #endif
         sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (sock != -1) is_valid = true;
+#ifdef _WIN32
+    if (sock != INVALID_SOCKET) is_valid = true;
+#else
+    if (sock >= 0) is_valid = true;
+#endif
 
         // Set Non-Blocking Mode
 #ifdef _WIN32
@@ -61,7 +77,7 @@ public:
 
         my_addr.sin_family = AF_INET;
         my_addr.sin_addr.s_addr = INADDR_ANY;
-        my_addr.sin_port = htons(port);
+        my_addr.sin_port = htons(static_cast<uint16_t>(port));
 
         if (::bind(sock, (struct sockaddr*)&my_addr, sizeof(my_addr)) < 0) {
             std::cerr << "Failed to bind to port " << port << std::endl;
@@ -73,10 +89,15 @@ public:
     void sendTo(const std::string& ip, int port, const std::vector<uint8_t>& data) {
         struct sockaddr_in target;
         target.sin_family = AF_INET;
-        target.sin_port = htons(port);
+        target.sin_port = htons(static_cast<uint16_t>(port));
         inet_pton(AF_INET, ip.c_str(), &target.sin_addr);
 
-        sendto(sock, (const char*)data.data(), data.size(), 0, (struct sockaddr*)&target, sizeof(target));
+        sendto(sock,
+               reinterpret_cast<const char*>(data.data()),
+               static_cast<int>(data.size()),
+               0,
+               reinterpret_cast<struct sockaddr*>(&target),
+               static_cast<int>(sizeof(target)));
     }
 
     bool receiveFrom(std::vector<uint8_t>& out_data, std::string& out_ip, int& out_port) {

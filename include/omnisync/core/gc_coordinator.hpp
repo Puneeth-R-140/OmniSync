@@ -137,10 +137,11 @@ public:
             // Only count as active if:
             // 1. Peer has been updated at least once (is_active)
             // 2. Within timeout window
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                now - state.last_seen).count();
+            const uint64_t elapsed_ms = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - state.last_seen).count());
             
-            if (state.is_active && elapsed < config_.peer_timeout_ms) {
+            if (state.is_active && elapsed_ms < config_.peer_timeout_ms) {
                 active.push_back(state);
             }
         }
@@ -183,11 +184,12 @@ public:
         if (!config_.auto_gc_enabled) return false;
         
         auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now - last_gc_time_).count();
+        const uint64_t elapsed_ms = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - last_gc_time_).count());
         
         // Check time interval
-        if (elapsed < config_.gc_interval_ms) return false;
+        if (elapsed_ms < config_.gc_interval_ms) return false;
         
         // Check minimum peers requirement
         if (getActivePeers().size() < config_.min_peers_for_gc) return false;

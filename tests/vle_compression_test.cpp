@@ -61,7 +61,7 @@ void testAtomCompression() {
         for (uint64_t clock = 1; clock <= 100; clock++) {
             OpID id = {client, clock};
             OpID origin = {client, clock - 1}; // Previous atom
-            test_atoms.emplace_back(id, origin, 'A' + (clock % 26));
+            test_atoms.emplace_back(id, origin, static_cast<char>('A' + (clock % 26)));
         }
     }
     

@@ -37,8 +37,8 @@ void random_op(int user_idx) {
 
     if (do_delete) {
         // Delete random index
-        std::uniform_int_distribution<int> dist_idx(0, current.length() - 1);
-        int idx = dist_idx(rng);
+        std::uniform_int_distribution<size_t> dist_idx(0, current.length() - 1);
+        size_t idx = dist_idx(rng);
         OpID target = seq.localDelete(idx);
         
         // Broadcast
@@ -47,11 +47,11 @@ void random_op(int user_idx) {
         }
     } else {
         // Insert random char
-        std::uniform_int_distribution<int> dist_idx(0, current.length()); // Can insert at end
+        std::uniform_int_distribution<size_t> dist_idx(0, current.length()); // Can insert at end
         std::uniform_int_distribution<int> dist_char(65, 90); // A-Z
         
-        int idx = dist_idx(rng);
-        char c = (char)dist_char(rng);
+        size_t idx = dist_idx(rng);
+        char c = static_cast<char>(dist_char(rng));
         
         Atom new_atom = seq.localInsert(idx, c);
         
