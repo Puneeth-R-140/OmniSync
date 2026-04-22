@@ -9,7 +9,7 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 option(OMNISYNC_BUILD_TESTS "Build OmniSync test executables" ON)
-option(OMNISYNC_BUILD_EXAMPLES "Build OmniSync example executables" OFF)
+option(OMNISYNC_BUILD_EXAMPLES "Build OmniSync example executables" ON)
 
 # Header-only target
 add_library(omnisync INTERFACE)

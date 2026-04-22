@@ -232,6 +232,66 @@ void test_heartbeat() {
     std::cout << "  PASS" << std::endl;
 }
 
+/**
+ * Test 7: Partition/rejoin safety with coordinated GC
+ */
+void test_partition_rejoin_gc_safety() {
+    std::cout << "Test 7: Partition/rejoin GC safety..." << std::endl;
+
+    Sequence user1(1), user2(2), user3(3);
+
+    GCCoordinator::Config cfg;
+    cfg.auto_gc_enabled = true;
+    cfg.gc_interval_ms = 1;
+    cfg.peer_timeout_ms = 100;
+    cfg.min_peers_for_gc = 1;
+
+    GCCoordinator gc1(1, cfg);
+    gc1.registerPeer(2);
+    gc1.registerPeer(3);
+
+    // Initial sync across all peers.
+    for (int i = 0; i < 12; i++) {
+        Atom a = user1.localInsert(i, static_cast<char>('a' + i));
+        user2.remoteMerge(a);
+        user3.remoteMerge(a);
+    }
+
+    // All peers active at first.
+    gc1.updateMyVectorClock(user1.getVectorClock());
+    gc1.updatePeerState(2, user2.getVectorClock());
+    gc1.updatePeerState(3, user3.getVectorClock());
+
+    // Simulate a partition where peer3 misses deletes.
+    std::vector<OpID> missed_deletes;
+    for (int i = 0; i < 5; i++) {
+        OpID d = user1.localDelete(0);
+        missed_deletes.push_back(d);
+        user2.remoteDelete(d);
+    }
+
+    // Keep peer2 fresh; let peer3 timeout so GC can proceed with active peers.
+    gc1.updateMyVectorClock(user1.getVectorClock());
+    gc1.updatePeerState(2, user2.getVectorClock());
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+
+    size_t removed = gc1.performCoordinatedGC(user1);
+    std::cout << "  User1 GC removed during partition: " << removed << std::endl;
+
+    // Peer3 rejoins and receives missed delete operations.
+    for (const auto& d : missed_deletes) {
+        user3.remoteDelete(d);
+    }
+
+    // Update peer3 as active again and verify convergence is preserved.
+    gc1.updatePeerState(3, user3.getVectorClock());
+
+    assert(user1.toString() == user2.toString());
+    assert(user2.toString() == user3.toString());
+
+    std::cout << "  PASS" << std::endl;
+}
+
 int main() {
     std::cout << "=== OmniSync GC Coordinator Tests ===" << std::endl << std::endl;
     
@@ -242,6 +302,7 @@ int main() {
         test_auto_gc_trigger();
         test_peer_timeout();
         test_heartbeat();
+        test_partition_rejoin_gc_safety();
         
         std::cout << std::endl << "=== ALL TESTS PASSED ===" << std::endl;
         return 0;

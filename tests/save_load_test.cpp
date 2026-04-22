@@ -1,9 +1,40 @@
 #include <iostream>
 #include <fstream>
 #include <cassert>
+#include <vector>
 #include "omnisync/omnisync.hpp"
 
 using namespace omnisync::core;
+
+static void test_invalid_magic() {
+    std::ofstream bad("bad_magic.os", std::ios::binary);
+    bad.write("BADD", 4);
+    uint8_t ver = 2;
+    bad.write((char*)&ver, 1);
+    bad.close();
+
+    Sequence doc(9);
+    std::ifstream in("bad_magic.os", std::ios::binary);
+    assert(in && "failed to open bad_magic.os");
+    bool ok = doc.load(in);
+    in.close();
+    assert(!ok && "load should fail when magic header is invalid");
+}
+
+static void test_unsupported_version() {
+    std::ofstream bad("bad_version.os", std::ios::binary);
+    bad.write("OMNI", 4);
+    uint8_t ver = 9; // unsupported
+    bad.write((char*)&ver, 1);
+    bad.close();
+
+    Sequence doc(10);
+    std::ifstream in("bad_version.os", std::ios::binary);
+    assert(in && "failed to open bad_version.os");
+    bool ok = doc.load(in);
+    in.close();
+    assert(!ok && "load should fail for unsupported save format version");
+}
 
 int main() {
     std::cout << "--- OmniSync Persistence Test ---\n";
@@ -57,6 +88,11 @@ int main() {
     doc2.localInsert(2, 'D'); 
     std::cout << "Doc2 Modified: " << doc2.toString() << "\n";
     assert(doc2.toString() == "ACD");
+
+    // 6. Negative tests for malformed persistence input
+    test_invalid_magic();
+    test_unsupported_version();
+    std::cout << "Malformed-input checks: PASS\n";
 
     std::cout << "SUCCESS: Save/Load Verified.\n";
     return 0;

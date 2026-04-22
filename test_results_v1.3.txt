@@ -1,8 +1,24 @@
-=== OmniSync v1.3 Test Results ===
+﻿OmniSync Full Regression Results (Current Baseline)
+Generated: 2026-04-22 19:39:04
 
-All tests passed successfully:
-- Fuzz test: 100% convergence
-- VLE compression: 82.4%
-- Delta sync: 90% reduction
-- Persistence: Verified
-- GC suite: 5/5 tests passed
+Test project E:/OmniSync/build
+    Start 1: delta_test
+1/8 Test #1: delta_test .......................   Passed    0.01 sec
+    Start 2: fuzz_test
+2/8 Test #2: fuzz_test ........................   Passed    0.13 sec
+    Start 3: gc_test
+3/8 Test #3: gc_test ..........................   Passed    0.01 sec
+    Start 4: gc_coord_test
+4/8 Test #4: gc_coord_test ....................   Passed    0.48 sec
+    Start 5: profiling_test
+5/8 Test #5: profiling_test ...................   Passed    0.01 sec
+    Start 6: save_load_test
+6/8 Test #6: save_load_test ...................   Passed    0.02 sec
+    Start 7: stability_test
+7/8 Test #7: stability_test ...................   Passed    0.01 sec
+    Start 8: vle_test
+8/8 Test #8: vle_test .........................   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 8
+
+Total Test time (real) =   0.69 sec

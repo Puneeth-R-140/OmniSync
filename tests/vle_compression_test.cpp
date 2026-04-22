@@ -171,6 +171,25 @@ void testCombinedBenefit() {
               << (original_bandwidth / delta_vle_bandwidth) << "x smaller!\n\n";
 }
 
+void testMalformedVLEInputs() {
+    std::cout << "=== Testing Malformed VLE Inputs ===\n\n";
+
+    // Continuation bit set but stream ends (truncated number).
+    std::vector<uint8_t> truncated = {0x80};
+    uint64_t decoded = 0;
+    size_t offset = 0;
+    bool ok = VLEEncoding::decodeUInt64(truncated, offset, decoded);
+    assert(!ok);
+
+    // 11 continuation bytes force shift growth beyond supported range.
+    std::vector<uint8_t> overflow_like(11, 0x80);
+    offset = 0;
+    ok = VLEEncoding::decodeUInt64(overflow_like, offset, decoded);
+    assert(!ok);
+
+    std::cout << "Malformed input handling works correctly\n\n";
+}
+
 int main() {
     std::cout << "--- OmniSync VLE Compression Test ---\n\n";
     
@@ -178,6 +197,7 @@ int main() {
     testAtomCompression();
     testWorstCase();
     testCombinedBenefit();
+    testMalformedVLEInputs();
     
     std::cout << "========================================\n";
     std::cout << "ALL VLE TESTS PASSED\n";
