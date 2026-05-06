@@ -103,7 +103,7 @@ public:
     bool receiveFrom(std::vector<uint8_t>& out_data, std::string& out_ip, int& out_port) {
         char buffer[4096];
         struct sockaddr_in sender;
-        int sender_len = sizeof(sender);
+        socklen_t sender_len = sizeof(sender);
 
         int len = recvfrom(sock, buffer, 4096, 0, (struct sockaddr*)&sender, &sender_len);
         

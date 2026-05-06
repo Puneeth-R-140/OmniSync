@@ -79,11 +79,11 @@ int main() {
     VectorClock bob_state = bob.getVectorClock();
     
     // Alice adds "!"
-    Atom alice_op = alice.localInsert(11, '!');
+    alice.localInsert(11, '!');
     std::cout << "  Alice: " << alice.toString() << "\n";
     
     // Bob adds "?" (concurrent with Alice's "!")
-    Atom bob_op = bob.localInsert(11, '?');
+    bob.localInsert(11, '?');
     std::cout << "  Bob: " << bob.toString() << " (before receiving Alice's edit)\n";
     
     // Exchange deltas
