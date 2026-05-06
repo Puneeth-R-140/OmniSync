@@ -20,3 +20,9 @@ Thumbs.db
 # Documentation (private planning)
 ROADMAP.md
 notes/
+
+# Generated test result files
+test_results_*.txt
+stability_test_results.csv
+save_test.os
+bad_*.os
