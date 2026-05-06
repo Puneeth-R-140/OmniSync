@@ -58,6 +58,9 @@ if(OMNISYNC_BUILD_TESTS)
 	omnisync_add_exec(save_load_test tests/save_load_test.cpp)
 	add_test(NAME save_load_test COMMAND save_load_test)
 
+	omnisync_add_exec(network_malformed_test tests/network_malformed_test.cpp)
+	add_test(NAME network_malformed_test COMMAND network_malformed_test)
+
 	omnisync_add_exec(stability_test tests/stability_test.cpp)
 	add_test(NAME stability_test COMMAND stability_test --duration-hours 0)
 

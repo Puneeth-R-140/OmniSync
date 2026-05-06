@@ -4,13 +4,15 @@
 #include <string>
 #include <cassert>
 #include <memory>
+#include <cstdlib>
 #include "omnisync/omnisync.hpp"
 
 using namespace omnisync::core;
 
-// Configuration
-const int NUM_USERS = 5;
-const int OPS_PER_USER = 500;
+// Configuration (can be overridden by command-line args)
+int NUM_USERS = 5;
+int OPS_PER_USER = 2000;
+unsigned int RANDOM_SEED = 1337;
 const int MAX_STRING_LEN = 10000;
 
 struct Packet {
@@ -25,7 +27,7 @@ std::vector<std::shared_ptr<Sequence>> users;
 std::vector<Packet> network_buffer;
 
 // Random Number Generator
-std::mt19937 rng(1337); 
+std::mt19937 rng(RANDOM_SEED); 
 
 void random_op(int user_idx) {
     auto& seq = *users[user_idx];
@@ -60,7 +62,15 @@ void random_op(int user_idx) {
     }
 }
 
-int main() {
+int main(int argc, char** argv) {
+    // Parse command-line arguments: OpsPerUser NumUsers Seed
+    if (argc > 1) OPS_PER_USER = std::atoi(argv[1]);
+    if (argc > 2) NUM_USERS = std::atoi(argv[2]);
+    if (argc > 3) RANDOM_SEED = std::atoi(argv[3]);
+
+    // Reinitialize RNG with new seed if provided
+    rng.seed(RANDOM_SEED);
+
     std::cout << "--- OmniSync Fuzz Test: Chaos Mode ---\n";
     std::cout << "Users: " << NUM_USERS << "\n";
     std::cout << "Ops/User: " << OPS_PER_USER << "\n";
@@ -70,6 +80,14 @@ int main() {
     users.reserve(NUM_USERS);
     for(int i=0; i<NUM_USERS; i++) {
         users.push_back(std::make_shared<Sequence>(i + 1));
+        
+        // Configure orphan buffer for heavy stress tests:
+        // - Allow large buffer (1M) to hold all orphans
+        // - Disable age-based eviction (UINT64_MAX = never)
+        users[i]->setOrphanConfig({
+            1000000,        // max_orphan_buffer_size: 1 MB
+            UINT64_MAX      // max_orphan_age: never evict by age
+        });
     }
 
     // 2. Generate Chaos (Local Ops)
