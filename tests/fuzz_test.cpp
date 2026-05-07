@@ -13,7 +13,6 @@ using namespace omnisync::core;
 int NUM_USERS = 5;
 int OPS_PER_USER = 2000;
 unsigned int RANDOM_SEED = 1337;
-const int MAX_STRING_LEN = 10000;
 
 struct Packet {
     int from_user;
