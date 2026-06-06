@@ -27,6 +27,23 @@ public:
     // Start at Time 0
     LamportClock() : counter(0) {}
 
+    // Custom copy/move operations to support atomic member counter
+    LamportClock(const LamportClock& other) : counter(other.counter.load()) {}
+    LamportClock& operator=(const LamportClock& other) {
+        if (this != &other) {
+            counter.store(other.counter.load());
+        }
+        return *this;
+    }
+
+    LamportClock(LamportClock&& other) noexcept : counter(other.counter.load()) {}
+    LamportClock& operator=(LamportClock&& other) noexcept {
+        if (this != &other) {
+            counter.store(other.counter.load());
+        }
+        return *this;
+    }
+
     /**
      * @brief Get the current logical time without changing it.
      */

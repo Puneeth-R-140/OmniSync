@@ -16,6 +16,21 @@
 namespace omnisync {
 namespace core {
 
+struct AVLNode {
+    OpID id;
+    std::list<Atom>::iterator atom_it;
+    size_t weight;          // 1 if active, 0 if deleted/sentinel
+    size_t subtree_weight;  // Sum of weights in subtree
+    int height;
+    AVLNode* left;
+    AVLNode* right;
+    AVLNode* parent;
+
+    AVLNode(OpID id_, std::list<Atom>::iterator it_, size_t w)
+        : id(id_), atom_it(it_), weight(w), subtree_weight(w), height(1),
+          left(nullptr), right(nullptr), parent(nullptr) {}
+};
+
 /**
  * @brief The RGA Sequence Container (Production Ready).
  * Features:
@@ -54,7 +69,10 @@ private:
     std::list<Atom> atoms;
     
     // Optimization Index
-    std::unordered_map<OpID, std::list<Atom>::iterator> atom_index;
+    std::unordered_map<OpID, AVLNode*> atom_index;
+
+    // AVL Tree Root
+    AVLNode* root = nullptr;
 
     // Phase 0: Orphan Buffer
     std::unordered_map<OpID, std::vector<Atom>> pending_orphans;
@@ -73,11 +91,255 @@ private:
     // GC Performance Tracking
     MemoryStats::GCStats gc_stats_;
 
+    // AVL Tree Helper Methods
+    int getHeight(AVLNode* n) const {
+        return n ? n->height : 0;
+    }
+
+    int getBalance(AVLNode* n) const {
+        return n ? getHeight(n->left) - getHeight(n->right) : 0;
+    }
+
+    void updateHeightAndWeight(AVLNode* n) {
+        if (!n) return;
+        n->height = 1 + std::max(getHeight(n->left), getHeight(n->right));
+        n->subtree_weight = n->weight + 
+                            (n->left ? n->left->subtree_weight : 0) + 
+                            (n->right ? n->right->subtree_weight : 0);
+    }
+
+    void rotateRight(AVLNode* y) {
+        AVLNode* x = y->left;
+        AVLNode* T2 = x->right;
+
+        x->right = y;
+        y->left = T2;
+
+        x->parent = y->parent;
+        if (y->parent) {
+            if (y->parent->left == y) y->parent->left = x;
+            else y->parent->right = x;
+        } else {
+            root = x;
+        }
+        y->parent = x;
+        if (T2) T2->parent = y;
+
+        updateHeightAndWeight(y);
+        updateHeightAndWeight(x);
+    }
+
+    void rotateLeft(AVLNode* x) {
+        AVLNode* y = x->right;
+        AVLNode* T2 = y->left;
+
+        y->left = x;
+        x->right = T2;
+
+        y->parent = x->parent;
+        if (x->parent) {
+            if (x->parent->left == x) x->parent->left = y;
+            else x->parent->right = y;
+        } else {
+            root = y;
+        }
+        x->parent = y;
+        if (T2) T2->parent = x;
+
+        updateHeightAndWeight(x);
+        updateHeightAndWeight(y);
+    }
+
+    AVLNode* rebalance(AVLNode* n) {
+        int balance = getBalance(n);
+
+        if (balance > 1 && getBalance(n->left) >= 0) {
+            AVLNode* new_root = n->left;
+            rotateRight(n);
+            return new_root;
+        }
+
+        if (balance > 1 && getBalance(n->left) < 0) {
+            AVLNode* new_root = n->left->right;
+            rotateLeft(n->left);
+            rotateRight(n);
+            return new_root;
+        }
+
+        if (balance < -1 && getBalance(n->right) <= 0) {
+            AVLNode* new_root = n->right;
+            rotateLeft(n);
+            return new_root;
+        }
+
+        if (balance < -1 && getBalance(n->right) > 0) {
+            AVLNode* new_root = n->right->left;
+            rotateRight(n->right);
+            rotateLeft(n);
+            return new_root;
+        }
+
+        return n;
+    }
+
+    void insertNode(AVLNode* parent_node, AVLNode* new_node) {
+        if (!parent_node) return;
+
+        if (!parent_node->right) {
+            parent_node->right = new_node;
+            new_node->parent = parent_node;
+        } else {
+            AVLNode* curr = parent_node->right;
+            while (curr->left) {
+                curr = curr->left;
+            }
+            curr->left = new_node;
+            new_node->parent = curr;
+        }
+
+        AVLNode* curr = new_node->parent;
+        while (curr) {
+            updateHeightAndWeight(curr);
+            AVLNode* new_curr = rebalance(curr);
+            curr = new_curr->parent;
+        }
+    }
+
+    void deleteNode(AVLNode* z) {
+        if (!z) return;
+
+        if (z->left && z->right) {
+            AVLNode* s = z->right;
+            while (s->left) s = s->left;
+
+            std::swap(z->id, s->id);
+            std::swap(z->atom_it, s->atom_it);
+            std::swap(z->weight, s->weight);
+
+            atom_index[z->id] = z;
+            atom_index[s->id] = s;
+
+            z = s;
+        }
+
+        AVLNode* child = z->left ? z->left : z->right;
+        AVLNode* parent = z->parent;
+
+        if (child) {
+            child->parent = parent;
+        }
+
+        if (parent) {
+            if (parent->left == z) parent->left = child;
+            else parent->right = child;
+        } else {
+            root = child;
+        }
+
+        delete z;
+
+        AVLNode* curr = parent;
+        while (curr) {
+            updateHeightAndWeight(curr);
+            AVLNode* new_curr = rebalance(curr);
+            curr = new_curr->parent;
+        }
+    }
+
+    void updateWeight(AVLNode* node, size_t new_weight) {
+        if (!node || node->weight == new_weight) return;
+        node->weight = new_weight;
+        AVLNode* curr = node;
+        while (curr) {
+            updateHeightAndWeight(curr);
+            curr = curr->parent;
+        }
+    }
+
+    void destroyTree(AVLNode* node) {
+        if (!node) return;
+        destroyTree(node->left);
+        destroyTree(node->right);
+        delete node;
+    }
+
+    AVLNode* findNodeByPrefixWeight(AVLNode* node, size_t target_weight) const {
+        if (!node) return nullptr;
+        if (target_weight == 0) {
+            AVLNode* curr = node;
+            while (curr->left) curr = curr->left;
+            return curr;
+        }
+
+        AVLNode* curr = node;
+        size_t remaining = target_weight;
+        while (curr) {
+            size_t left_weight = curr->left ? curr->left->subtree_weight : 0;
+            if (remaining <= left_weight) {
+                if (!curr->left) return curr;
+                curr = curr->left;
+            } else if (remaining <= left_weight + curr->weight) {
+                return curr;
+            } else {
+                remaining -= (left_weight + curr->weight);
+                if (!curr->right) return curr;
+                curr = curr->right;
+            }
+        }
+        return nullptr;
+    }
+
 public:
     Sequence(uint64_t client_id) : my_client_id(client_id), vector_clock(client_id) {
         OpID start_id = {0, 0};
         atoms.emplace_back(start_id, start_id, '\0');
-        atom_index[start_id] = atoms.begin();
+        root = new AVLNode(start_id, atoms.begin(), 0);
+        atom_index[start_id] = root;
+    }
+
+    ~Sequence() {
+        destroyTree(root);
+    }
+
+    Sequence(const Sequence&) = delete;
+    Sequence& operator=(const Sequence&) = delete;
+
+    Sequence(Sequence&& other) noexcept 
+        : my_client_id(other.my_client_id),
+          clock(std::move(other.clock)),
+          vector_clock(std::move(other.vector_clock)),
+          atoms(std::move(other.atoms)),
+          atom_index(std::move(other.atom_index)),
+          pending_orphans(std::move(other.pending_orphans)),
+          pending_deletes(std::move(other.pending_deletes)),
+          gc_config(other.gc_config),
+          tombstone_count(other.tombstone_count),
+          orphan_config(other.orphan_config),
+          total_orphan_count(other.total_orphan_count),
+          gc_stats_(other.gc_stats_),
+          root(other.root) {
+        other.root = nullptr;
+    }
+
+    Sequence& operator=(Sequence&& other) noexcept {
+        if (this != &other) {
+            destroyTree(root);
+            my_client_id = other.my_client_id;
+            clock = std::move(other.clock);
+            vector_clock = std::move(other.vector_clock);
+            atoms = std::move(other.atoms);
+            atom_index = std::move(other.atom_index);
+            pending_orphans = std::move(other.pending_orphans);
+            pending_deletes = std::move(other.pending_deletes);
+            gc_config = other.gc_config;
+            tombstone_count = other.tombstone_count;
+            orphan_config = other.orphan_config;
+            total_orphan_count = other.total_orphan_count;
+            gc_stats_ = other.gc_stats_;
+            root = other.root;
+            other.root = nullptr;
+        }
+        return *this;
     }
 
     Atom localInsert(size_t literal_index, char content) {
@@ -85,28 +347,8 @@ public:
         vector_clock.tick(); // Update vector clock too
         OpID new_id = { my_client_id, tick };
 
-        // Resolve the atom immediately to the left of the requested visual index.
-        // This avoids relying on end()/decrement edge cases and keeps behavior stable
-        // even when GC has recently removed tombstones.
-        auto parent_it = atoms.begin(); // Start sentinel is always valid parent fallback.
-        size_t visual_index = 0;
-
-        for (auto it = atoms.begin(); it != atoms.end(); ++it) {
-            if (it->content == 0) {
-                parent_it = it;
-                continue;
-            }
-
-            if (!it->is_deleted) {
-                if (visual_index == literal_index) {
-                    break;
-                }
-                parent_it = it;
-                visual_index++;
-            }
-        }
-
-        OpID parent_id = parent_it->id;
+        AVLNode* parent_node = findNodeByPrefixWeight(root, literal_index);
+        OpID parent_id = parent_node ? parent_node->id : OpID{0, 0};
         Atom new_atom(new_id, parent_id, content);
         
         // UNIFIED LOGIC: Treat local inserts exactly like remote ones.
@@ -124,7 +366,6 @@ public:
         auto parent_map_it = atom_index.find(new_atom.origin);
         if (parent_map_it == atom_index.end()) {
             // Orphan: parent doesn't exist yet
-            // Enforce buffer limits only
             if (total_orphan_count >= orphan_config.max_orphan_buffer_size) {
                 evictOldOrphans();
             }
@@ -133,7 +374,8 @@ public:
             return;
         }
 
-        auto parent_it = parent_map_it->second;
+        AVLNode* parent_node = parent_map_it->second;
+        auto parent_it = parent_node->atom_it;
         auto current_it = std::next(parent_it);
         
         while (current_it != atoms.end()) {
@@ -147,11 +389,22 @@ public:
         }
 
         auto new_it = atoms.insert(current_it, new_atom);
-        atom_index[new_atom.id] = new_it;
+        
+        auto prev_it = std::prev(new_it);
+        AVLNode* prev_node = atom_index[prev_it->id];
+
+        size_t weight = new_atom.is_deleted ? 0 : 1;
+        if (new_atom.id.client_id == 0 && new_atom.id.clock == 0) weight = 0; // sentinel
+        
+        AVLNode* new_node = new AVLNode(new_atom.id, new_it, weight);
+        atom_index[new_atom.id] = new_node;
+        
+        insertNode(prev_node, new_node);
         
         if (pending_deletes.count(new_atom.id)) {
             new_it->is_deleted = true;
             tombstone_count++;
+            updateWeight(new_node, 0);
             pending_deletes.erase(new_atom.id);
         }
         
@@ -167,25 +420,14 @@ public:
         clock.tick();
         vector_clock.tick();
 
-        auto it = atoms.begin();
-        size_t current_visual_idx = 0;
-        bool found = false;
-
-        while (it != atoms.end()) {
-            if (!it->is_deleted && it->content != 0) {
-                if (current_visual_idx == literal_index) {
-                    found = true;
-                    break;
-                }
-                current_visual_idx++;
-            }
-            it++;
-        }
-
-        if (found) {
+        AVLNode* target_node = findNodeByPrefixWeight(root, literal_index + 1);
+        if (target_node && target_node->weight == 1) {
+            auto it = target_node->atom_it;
             OpID deleted_id = it->id;
             it->is_deleted = true;
             tombstone_count++;
+            
+            updateWeight(target_node, 0);
             
             // Auto-GC check
             if (gc_config.auto_gc_enabled && tombstone_count >= gc_config.tombstone_threshold) {
@@ -200,9 +442,11 @@ public:
     void remoteDelete(OpID target_id) {
         auto map_it = atom_index.find(target_id);
         if (map_it != atom_index.end()) {
-            if (!map_it->second->is_deleted) {
-                map_it->second->is_deleted = true;
+            AVLNode* node = map_it->second;
+            if (!node->atom_it->is_deleted) {
+                node->atom_it->is_deleted = true;
                 tombstone_count++;
+                updateWeight(node, 0);
             }
         } else {
             pending_deletes.insert(target_id);
@@ -386,7 +630,7 @@ public:
         
         // Approximate memory calculations
         stats.atom_list_bytes = atoms.size() * sizeof(Atom);
-        stats.index_map_bytes = atom_index.size() * (sizeof(OpID) + sizeof(void*) + 32); // Map overhead
+        stats.index_map_bytes = atom_index.size() * (sizeof(OpID) + sizeof(AVLNode*) + 32) + atom_index.size() * sizeof(AVLNode); // Map + AVL nodes overhead
         stats.orphan_buffer_bytes = total_orphan_count * sizeof(Atom);
         stats.vector_clock_bytes = vector_clock.getState().size() * 16;
         
@@ -427,39 +671,17 @@ private:
      * @brief Actually remove tombstones from all data structures.
      */
     void removeTombstones(const std::vector<OpID>& to_remove) {
-        bool removed_any = false;
-
         for (const auto& id : to_remove) {
             auto map_it = atom_index.find(id);
             if (map_it != atom_index.end()) {
-                // Do not trust stored iterators blindly in debug builds.
-                // If index integrity is ever compromised, erase by ID lookup.
-                auto list_it = atoms.end();
-                for (auto it = atoms.begin(); it != atoms.end(); ++it) {
-                    if (it->id == id) {
-                        list_it = it;
-                        break;
-                    }
-                }
-
-                if (list_it != atoms.end()) {
-                    atoms.erase(list_it);
-                    removed_any = true;
-                }
+                AVLNode* node = map_it->second;
+                auto list_it = node->atom_it;
+                atoms.erase(list_it);
+                
+                deleteNode(node);
                 atom_index.erase(map_it);
                 tombstone_count--;
             }
-        }
-
-        if (removed_any) {
-            rebuildIndex();
-        }
-    }
-
-    void rebuildIndex() {
-        atom_index.clear();
-        for (auto it = atoms.begin(); it != atoms.end(); ++it) {
-            atom_index.emplace(it->id, it);
         }
     }
     
@@ -573,6 +795,11 @@ public:
         atom_index.clear();
         pending_orphans.clear();
         pending_deletes.clear();
+        
+        destroyTree(root);
+        root = nullptr;
+        tombstone_count = 0;
+        total_orphan_count = 0;
 
         in.read((char*)&my_client_id, sizeof(my_client_id));
         uint64_t clock_val;
@@ -601,7 +828,22 @@ public:
             atoms.push_back(a);
             
             auto last_it = std::prev(atoms.end());
-            atom_index[a.id] = last_it;
+            
+            size_t weight = a.is_deleted ? 0 : 1;
+            if (a.id.client_id == 0 && a.id.clock == 0) weight = 0;
+            
+            AVLNode* new_node = new AVLNode(a.id, last_it, weight);
+            atom_index[a.id] = new_node;
+            
+            if (a.is_deleted) tombstone_count++;
+
+            if (i == 0) {
+                root = new_node;
+            } else {
+                auto prev_it = std::prev(last_it);
+                AVLNode* prev_node = atom_index[prev_it->id];
+                insertNode(prev_node, new_node);
+            }
         }
 
         return true;
