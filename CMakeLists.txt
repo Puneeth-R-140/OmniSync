@@ -66,6 +66,9 @@ if(OMNISYNC_BUILD_TESTS)
 
 	omnisync_add_exec(vle_test tests/vle_compression_test.cpp)
 	add_test(NAME vle_test COMMAND vle_test)
+
+	omnisync_add_exec(performance_benchmark tests/performance_benchmark.cpp)
+	add_test(NAME performance_benchmark COMMAND performance_benchmark)
 endif()
 
 if(OMNISYNC_BUILD_EXAMPLES)
