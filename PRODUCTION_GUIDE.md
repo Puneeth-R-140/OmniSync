@@ -5,7 +5,7 @@ Version: 1.4.0
 
 ## Introduction
 
-OmniSync has been battle-tested for long-running sessions (24+ hours). This guide shares practical lessons learned and best practices for production deployments.
+OmniSync has been validated for long-running sessions in a 24-hour stability run. This guide shares practical lessons learned and best practices for production deployments.
 
 ## Memory Management
 

@@ -4,6 +4,8 @@
 **Version**: 1.3.0  
 **System**: Windows, g++ compiler
 
+> Scope note: these numbers were measured on the repository test workloads and local machine used for this session. They are useful for comparing implementations under the same conditions, but they are not universal guarantees.
+
 ---
 
 ## Methodology
@@ -53,7 +55,7 @@ Reduction:           14000 bytes
 Compression ratio:   82.4%
 Average VLE size:    6.0 bytes/atom
 
-✅ VLE achieves 82% compression
+VLE achieves 82% compression
 ```
 
 **Proof**: Run `./vle_test.exe` to reproduce.
@@ -136,9 +138,9 @@ Result: (1 - (0.10 × 0.18)) × 100% = 98.2% reduction
 **Factor**: 34,000 / 600 = **56.7x** smaller
 
 **Proof**: 
-1. VLE test shows 6 bytes/atom ✅
-2. Delta sync sends only new edits ✅
-3. Math: 100 new edits × 6 bytes = 600 bytes ✅
+1. VLE test shows 6 bytes/atom
+2. Delta sync sends only new edits
+3. Math: 100 new edits × 6 bytes = 600 bytes
 
 ---
 
@@ -157,7 +159,7 @@ Large IDs (4 billion+ operations):
   Fixed-size: 34 bytes
   VLE:        22 bytes
 
-✅ VLE handles edge cases correctly
+VLE handles edge cases correctly
 ```
 
 **Even in worst case**: 35% reduction (34 → 22 bytes)
@@ -184,7 +186,7 @@ Shuffling 2500 packets to simulate extreme lag...
 Syncing all users...
 
 --- VERIFICATION ---
-✅ SUCCESS: All 5 users converged identically.
+SUCCESS: All 5 users converged identically.
 Final Content Length: 952
 ```
 
@@ -251,38 +253,50 @@ Total memory: 9 KB
 **Key findings:**
 - GC overhead is negligible (< 2%)
 - Memory usage becomes bounded and predictable
-- Convergence guarantee preserved (fuzz tested)
+- Convergence preserved (fuzz tested)
 - Safe for production use
 
 ---
 
 ## Competitive Comparison
 
-### What We CAN Verify
+### What We Can Verify in This Repository
 
-| Metric | OmniSync v1.3 | Verified? |
+| Metric | Current result | Verified by |
 |--------|---------------|--------------|
-| Fixed atom size | 34 bytes | ✅ Code |
-| VLE atom size | 6 bytes (avg) | ✅ Test output |
-| VLE compression | 82.4% | ✅ Test output |
-| Delta sync | Works | ✅ Test output |
-| Combined (calc) | 98.2% | ✅ Math |
-| Fuzz test | Pass | ✅ Test output (2,500 ops) |
-| Garbage collection | Works | ✅ Test output (5 tests) |
-| GC overhead | < 2% | ✅ Test timing |
-| Memory bounded | Yes | ✅ Test output |
+| Fixed atom size | 34 bytes | Code |
+| VLE atom size | 6 bytes average | `vle_test.exe` |
+| VLE compression | 82.4% | `vle_test.exe` |
+| Delta sync | Works | `delta_test.exe` |
+| Combined reduction | 98.2% | Calculated from measured VLE + delta behavior |
+| Fuzz test | Pass | `fuzz_test.exe` |
+| Garbage collection | Works | `gc_test.exe` |
+| GC overhead | Minimal | `gc_test.exe` |
+| Memory bounded | Yes | `gc_test.exe` |
 
-### What We CANNOT Verify (Yet)
+### Current Yjs Comparison (Local Session)
 
-| Claim | Status | Next Step |
-|-------|--------|-----------|
-| "Faster than Yjs" | ❌ Not tested | Need direct benchmark |
-| "95% vs 98%" comparison | ❌ Theoretical | Need Yjs test |
-| "Slower on large docs" | ❌ Unknown | Need 1GB doc test |
+The local comparison run in this session used `omnisync_bench.exe` and `node --expose-gc benchmarks/yjs_bench.mjs` on the same machine.
+
+| Workload | OmniSync (ms) | Yjs (ms) | Observation |
+|---------|----------------|----------|-------------|
+| Sequential insert | 4.4732 | 792.711 | OmniSync was much faster on this workload |
+| Random insert | 6.1235 | 18.176 | OmniSync was faster on this workload |
+| Sequential delete | 0.9663 | 1085.286 | OmniSync was much faster on this workload |
+| Concurrent merge | 3.3399 | 0.197 | Yjs was faster on this workload |
+| `toString()` snapshot | 0.1686 | 0.080 | Yjs was faster on this workload |
+
+### What Needs Careful Interpretation
+
+| Claim | Status | Reason |
+|-------|--------|--------|
+| "Always faster than Yjs" | Not defensible | Different workloads favor different data paths |
+| "Universal benchmark winner" | Not defensible | Results depend on compiler, hardware, and workload size |
+| "Production-ready for every deployment" | Not defensible | Transport, auth, and deployment policy are application responsibilities |
 
 ---
 
-## Reproducibility Guarantee
+## Reproducibility Notes
 
 ### Run All Tests
 
@@ -309,7 +323,7 @@ Total memory: 9 KB
 Every test prints:
 - Input parameters
 - Measured results
-- ✅ or ❌ status
+- PASS or FAIL status
 
 No hidden magic. Pure reproducible science.
 
@@ -319,15 +333,15 @@ No hidden magic. Pure reproducible science.
 
 ### What We Don't Know
 
-1. **Real Yjs Comparison**: We haven't downloaded Yjs and tested side-by-side
+1. **Real Yjs Comparison**: The local comparison is measured, but it still covers a single machine and workload set
 2. **Large Document Performance**: Not tested beyond 2,500 atoms
 3. **Memory Usage**: Not measured
-4. **Latency**: Not benchmarked (< 1ms claim unproven)
+4. **Latency**: Not benchmarked for a general claim (< 1ms is not established)
 5. **Throughput**: Not tested (ops/sec unknown)
 
 ### What We Do Know
 
-1. **VLE works**: 82% reduction proven with 500 atoms
+1. **VLE works**: 82% reduction measured with 500 atoms
 2. **Delta sync works**: 45-90% reduction depending on doc size
 3. **Math checks out**: 98% is correct IF both work (they do)
 4. **Fuzz tested**: 2,500 ops, 100% convergence
@@ -359,12 +373,13 @@ No hidden magic. Pure reproducible science.
 ## Certification
 
 **I certify that**:
-- ✅ All test results are reproducible
-- ✅ No numbers are fabricated
-- ✅ Math is correct
-- ✅ Code is available for inspection
-- ⚠️ Yjs comparison is theoretical (not tested)
-- ⚠️ Large-scale performance is untested
+- All test results are reproducible
+- No numbers are fabricated
+- Math is correct
+- Code is available for inspection
+- Yjs comparison was run locally in this repository session
+- Large-scale performance is untested
+- Results are workload-specific, not universal promises
 
 **Signed**: Puneeth R  
 **Date**: January 15, 2026

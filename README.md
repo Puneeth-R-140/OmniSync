@@ -4,13 +4,15 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.wikipedia.org/wiki/C%2B%2B17)
-[![Version](https://img.shields.io/badge/version-1.4.0-green.svg)](RELEASE_NOTES_v1.4.md)
+[![Version](https://img.shields.io/badge/version-1.4.0-green.svg)](RELEASE_NOTES.md)
 
 ---
 
 ## Performance
 
 **Measured and Verified** (not marketing claims):
+
+These numbers were measured in this repository on the current Windows Release build and workload set. They are useful for study and comparison, but they are not guarantees for every machine, compiler, or document shape.
 
 ```bash
 # Run our tests yourself:
@@ -40,7 +42,7 @@ OmniSync implements the **RGA (Replicated Growable Array)** algorithm for confli
 
 - **Header-Only**: No build complexity, just `#include`
 - **Zero Dependencies**: Pure C++17 standard library
-- **Battle-Tested**: 24-hour stability test with 382K operations
+- **Validated**: 24-hour stability test with 382K operations
 - **Production Ready**: Delta sync + VLE compression + Distributed GC
 - **Memory Managed**: Bounded memory usage with coordinated garbage collection
 - **Performance Profiled**: Microsecond-level GC timing and memory analytics
@@ -185,6 +187,28 @@ OmniSync includes several examples demonstrating different features:
 - Vector clock frontier computation
 - Heartbeat and peer management
 - Safe distributed tombstone removal
+
+### Collaborative Editor Demo
+[`examples/collaborative_editor.cpp`](examples/collaborative_editor.cpp) - live peer-to-peer editing demo:
+- Non-blocking UDP sync between two local peers
+- Each keystroke becomes a CRDT atom and merges through `Sequence`
+- Cursor position is anchored to `OpID`, so inserts and deletes stay stable under remote edits
+- Terminal rendering uses ANSI styles for formatting marks such as bold, italic, underline, and colors
+- Commands support formatting, clearing marks, garbage collection, and clean exit
+
+**Portability note:** the core OmniSync engine is designed to be cross-platform and can be integrated into Windows, Linux, and macOS applications. The current terminal demo is Windows-first because it uses Windows console input APIs (`conio.h`, `_getch`, and `system("cls")`), so the demo itself is not yet universally portable without adapting the input/rendering layer.
+
+### How the Demo Works
+
+The collaborative editor is a small terminal application built on top of the same CRDT engine as the core library. It uses the following flow:
+
+1. Local typing converts into CRDT operations on `Sequence`.
+2. Operations are serialized with delta sync and sent over UDP to the peer.
+3. The peer applies those operations through the same merge rules, so both copies converge.
+4. The cursor is tracked by logical `OpID` rather than a fragile screen index, which keeps mid-line editing stable when remote edits arrive.
+5. Formatting marks are stored as CRDT range metadata and rendered in the terminal with ANSI styling.
+
+This is an original OmniSync implementation. It follows the same broad architecture pattern used by collaborative editors built on CRDTs, but it is not affiliated with or endorsed by Yjs, Automerge, or any other project.
 
 ---
 
@@ -335,6 +359,18 @@ doc.load(in);
 | Rich Text | No (planned) | Yes |
 | Bindings | C++ only | Many |
 
+### Local Benchmark Comparison
+
+The table below uses the same local benchmark workloads from `benchmarks/omnisync_bench.cpp` and `benchmarks/yjs_bench.mjs` on this Windows machine. These numbers are useful for study and relative comparison, but they are still workload-specific.
+
+| Workload | OmniSync (ms) | Yjs (ms) | Observation |
+|----------|----------------|----------|-------------|
+| Sequential insert | 4.4732 | 792.711 | OmniSync was much faster on this workload |
+| Random insert | 6.1235 | 18.176 | OmniSync was faster on this workload |
+| Sequential delete | 0.9663 | 1085.286 | OmniSync was much faster on this workload |
+| Concurrent merge | 3.3399 | 0.197 | Yjs was faster on this workload |
+| `toString()` snapshot | 0.1686 | 0.080 | Yjs was faster on this workload |
+
 **When to use OmniSync:**
 - C++ native applications
 - Zero-dependency requirement
@@ -377,8 +413,7 @@ See [ROADMAP.md](ROADMAP.md) for detailed plans.
 
 - **[BENCHMARKS.md](BENCHMARKS.md)** - Full performance methodology
 - **[ROADMAP.md](ROADMAP.md)** - Development plans
-- **[RELEASE_NOTES_v1.3.md](RELEASE_NOTES_v1.3.md)** - v1.3 Garbage Collection release
-- **[RELEASE_NOTES_v1.2.md](RELEASE_NOTES_v1.2.md)** - v1.2 Version history
+- **[RELEASE_NOTES.md](RELEASE_NOTES.md)** - Consolidated release history for v1.2, v1.3, and v1.4
 
 ---
 
@@ -422,16 +457,19 @@ If you use OmniSync in academic work:
 A: Yes. v1.3 includes garbage collection for long-running sessions. Memory usage is bounded and predictable.
 
 **Q: How does this compare to Yjs?**  
-A: We haven't benchmarked side-by-side yet (planned for v1.5). Our tests show similar compression ratios.
+A: The repository now includes a local side-by-side benchmark, but the numbers still depend on workload, hardware, and build flags. Use them as study data, not as a universal claim.
 
 **Q: Why C++?**  
 A: Native performance, zero GC pauses, embedded systems support.
 
 **Q: Are the benchmarks real?**  
-A: Yes. Run `./vle_test.exe` yourself. Full source in `tests/`.
+A: Yes. The results come from the repository test workloads and the benchmark sources are in `tests/` and `benchmarks/`. They are reproducible, but environment-specific.
 
 **Q: What about rich text?**  
 A: Planned for v2.0. Current focus is rock-solid plain text.
+
+**Q: Is the collaborative editor based on the same kind of architecture as other CRDT editors?**  
+A: Yes. It uses the same broad CRDT pattern: deterministic operation IDs, delta sync, and merge-by-structure rather than merge-by-text-offset. The implementation is original and does not claim affiliation with external projects.
 
 ---
 

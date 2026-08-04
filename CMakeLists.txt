@@ -69,6 +69,12 @@ if(OMNISYNC_BUILD_TESTS)
 
 	omnisync_add_exec(performance_benchmark tests/performance_benchmark.cpp)
 	add_test(NAME performance_benchmark COMMAND performance_benchmark)
+
+	omnisync_add_exec(marks_test tests/marks_test.cpp)
+	add_test(NAME marks_test COMMAND marks_test)
+
+	omnisync_add_exec(concurrent_robustness_test tests/concurrent_robustness_test.cpp)
+	add_test(NAME concurrent_robustness_test COMMAND concurrent_robustness_test)
 endif()
 
 if(OMNISYNC_BUILD_EXAMPLES)
@@ -77,7 +83,11 @@ if(OMNISYNC_BUILD_EXAMPLES)
 	omnisync_add_exec(example_distributed_gc examples/distributed_gc_example.cpp)
 	omnisync_add_exec(example_memory_profiling examples/memory_profiling_demo.cpp)
 	omnisync_add_exec(example_save_load examples/save_load_demo.cpp)
+	omnisync_add_exec(example_collaborative_editor examples/collaborative_editor.cpp)
 endif()
+
+# Benchmarks (always built, Release mode for fair comparison)
+omnisync_add_exec(omnisync_bench benchmarks/omnisync_bench.cpp)
 
 install(TARGETS omnisync EXPORT OmniSyncTargets)
 

@@ -60,6 +60,14 @@ public:
         uint64_t max_orphan_age = 1000;        // Clock difference threshold
     };
 
+    struct Mark {
+        OpID id;           // Unique ID for the mark {client_id, clock}
+        OpID start_id;     // OpID of the character where formatting starts (inclusive)
+        OpID end_id;       // OpID of the character where formatting ends (inclusive)
+        std::string type;  // e.g., "bold", "italic", "underline", "red", "green", etc.
+        bool is_deleted = false;
+    };
+
 private:
     uint64_t my_client_id;
     LamportClock clock;
@@ -80,9 +88,16 @@ private:
     // Phase 0.5: Delete Buffer
     std::unordered_set<OpID> pending_deletes;
     
+    // Formatting Marks
+    std::unordered_map<OpID, Mark> marks;
+    
     // Garbage Collection State
     GCConfig gc_config;
     size_t tombstone_count = 0;
+
+    // Cached visible text for repeated toString() calls
+    mutable std::string cached_string;
+    mutable bool cached_string_dirty = true;
     
     // Orphan Buffer State
     OrphanConfig orphan_config;
@@ -106,6 +121,10 @@ private:
         n->subtree_weight = n->weight + 
                             (n->left ? n->left->subtree_weight : 0) + 
                             (n->right ? n->right->subtree_weight : 0);
+    }
+
+    void invalidateStringCache() {
+        cached_string_dirty = true;
     }
 
     void rotateRight(AVLNode* y) {
@@ -312,8 +331,11 @@ public:
           atom_index(std::move(other.atom_index)),
           pending_orphans(std::move(other.pending_orphans)),
           pending_deletes(std::move(other.pending_deletes)),
+          marks(std::move(other.marks)),
           gc_config(other.gc_config),
           tombstone_count(other.tombstone_count),
+                    cached_string(std::move(other.cached_string)),
+                    cached_string_dirty(other.cached_string_dirty),
           orphan_config(other.orphan_config),
           total_orphan_count(other.total_orphan_count),
           gc_stats_(other.gc_stats_),
@@ -331,8 +353,11 @@ public:
             atom_index = std::move(other.atom_index);
             pending_orphans = std::move(other.pending_orphans);
             pending_deletes = std::move(other.pending_deletes);
+            marks = std::move(other.marks);
             gc_config = other.gc_config;
             tombstone_count = other.tombstone_count;
+            cached_string = std::move(other.cached_string);
+            cached_string_dirty = other.cached_string_dirty;
             orphan_config = other.orphan_config;
             total_orphan_count = other.total_orphan_count;
             gc_stats_ = other.gc_stats_;
@@ -383,7 +408,7 @@ public:
             if (c.origin.clock < new_atom.origin.clock) break;
 
             if (c.origin == new_atom.origin) {
-                if (new_atom.id < c.id) break; 
+                if (c.id < new_atom.id) break; 
             }
             current_it++;
         }
@@ -414,6 +439,8 @@ public:
         if (gc_config.auto_gc_enabled && tombstone_count >= gc_config.tombstone_threshold) {
             garbageCollectLocal(gc_config.min_age_threshold);
         }
+
+        invalidateStringCache();
     }
     
     OpID localDelete(size_t literal_index) {
@@ -428,6 +455,7 @@ public:
             tombstone_count++;
             
             updateWeight(target_node, 0);
+            invalidateStringCache();
             
             // Auto-GC check
             if (gc_config.auto_gc_enabled && tombstone_count >= gc_config.tombstone_threshold) {
@@ -439,6 +467,12 @@ public:
         return {0,0};
     }
 
+    void localDeleteId(OpID target_id) {
+        clock.tick();
+        vector_clock.tick();
+        remoteDelete(target_id);
+    }
+
     void remoteDelete(OpID target_id) {
         auto map_it = atom_index.find(target_id);
         if (map_it != atom_index.end()) {
@@ -447,6 +481,7 @@ public:
                 node->atom_it->is_deleted = true;
                 tombstone_count++;
                 updateWeight(node, 0);
+                invalidateStringCache();
             }
         } else {
             pending_deletes.insert(target_id);
@@ -671,11 +706,42 @@ private:
      * @brief Actually remove tombstones from all data structures.
      */
     void removeTombstones(const std::vector<OpID>& to_remove) {
+        if (to_remove.empty()) return;
+
         for (const auto& id : to_remove) {
             auto map_it = atom_index.find(id);
             if (map_it != atom_index.end()) {
                 AVLNode* node = map_it->second;
                 auto list_it = node->atom_it;
+
+                // Adjust formatting mark boundaries pointing to this atom
+                for (auto& [mark_id, mark] : marks) {
+                    if (mark.start_id == id) {
+                        auto next_it = std::next(list_it);
+                        if (next_it != atoms.end()) {
+                            mark.start_id = next_it->id;
+                        } else {
+                            if (list_it != atoms.begin()) {
+                                mark.start_id = std::prev(list_it)->id;
+                            } else {
+                                mark.start_id = {0, 0};
+                            }
+                        }
+                    }
+                    if (mark.end_id == id) {
+                        if (list_it != atoms.begin()) {
+                            mark.end_id = std::prev(list_it)->id;
+                        } else {
+                            auto next_it = std::next(list_it);
+                            if (next_it != atoms.end()) {
+                                mark.end_id = next_it->id;
+                            } else {
+                                mark.end_id = {0, 0};
+                            }
+                        }
+                    }
+                }
+
                 atoms.erase(list_it);
                 
                 deleteNode(node);
@@ -683,6 +749,8 @@ private:
                 tombstone_count--;
             }
         }
+
+        invalidateStringCache();
     }
     
     /**
@@ -736,23 +804,179 @@ private:
 
 public:
     std::string toString() const {
-        std::string result = "";
+        if (!cached_string_dirty) {
+            return cached_string;
+        }
+
+        cached_string.clear();
         for (const auto& a : atoms) {
             if (!a.is_deleted && a.content != 0) {
-                result += a.content;
+                cached_string += a.content;
+            }
+        }
+        cached_string_dirty = false;
+        return cached_string;
+    }
+
+    std::vector<std::pair<char, std::vector<std::string>>> getStyledCharacters() const {
+        std::vector<std::pair<char, std::vector<std::string>>> result;
+        auto active_marks = getActiveMarks();
+        std::unordered_map<OpID, std::vector<std::string>> atom_styles;
+        
+        for (const auto& mark : active_marks) {
+            bool inside = false;
+            for (const auto& atom : atoms) {
+                if (atom.id == mark.start_id) {
+                    inside = true;
+                }
+                if (inside && !atom.is_deleted && atom.content != '\0') {
+                    atom_styles[atom.id].push_back(mark.type);
+                }
+                if (atom.id == mark.end_id) {
+                    inside = false;
+                }
+            }
+        }
+        
+        for (const auto& atom : atoms) {
+            if (!atom.is_deleted && atom.content != '\0') {
+                std::vector<std::pair<char, std::vector<std::string>>>::value_type::second_type styles = atom_styles[atom.id];
+                result.push_back({atom.content, styles});
             }
         }
         return result;
     }
 
+    OpID getAtomIdAt(size_t index) const {
+        size_t count = 0;
+        for (const auto& atom : atoms) {
+            if (!atom.is_deleted && atom.content != '\0') {
+                if (count == index) {
+                    return atom.id;
+                }
+                count++;
+            }
+        }
+        return {0, 0};
+    }
+
+    Atom localInsertAfter(OpID parent_id, char content) {
+        uint64_t tick = clock.tick();
+        vector_clock.tick();
+        OpID new_id = { my_client_id, tick };
+        Atom new_atom(new_id, parent_id, content);
+        remoteMerge(new_atom);
+        return new_atom;
+    }
+
+    OpID getPredecessor(OpID id) const {
+        auto it = atom_index.find(id);
+        if (it == atom_index.end()) return {0, 0};
+        
+        auto list_it = it->second->atom_it;
+        while (list_it != atoms.begin()) {
+            list_it = std::prev(list_it);
+            if (!list_it->is_deleted) {
+                return list_it->id;
+            }
+        }
+        return {0, 0};
+    }
+
+    OpID getSuccessor(OpID id) const {
+        auto it = atom_index.find(id);
+        if (it == atom_index.end()) {
+            auto list_it = atoms.begin();
+            while (list_it != atoms.end()) {
+                if (list_it != atoms.begin() && !list_it->is_deleted) {
+                    return list_it->id;
+                }
+                list_it = std::next(list_it);
+            }
+            return {0, 0};
+        }
+        
+        auto list_it = std::next(it->second->atom_it);
+        while (list_it != atoms.end()) {
+            if (!list_it->is_deleted) {
+                return list_it->id;
+            }
+            list_it = std::next(list_it);
+        }
+        return id;
+    }
+
+    size_t getVisualIndex(OpID id) const {
+        size_t index = 0;
+        for (const auto& atom : atoms) {
+            if (atom.id == id) {
+                return index;
+            }
+            if (!atom.is_deleted && atom.content != '\0') {
+                index++;
+            }
+        }
+        return 0;
+    }
+
+    void addMark(OpID start_id, OpID end_id, const std::string& type) {
+        uint64_t tick = clock.tick();
+        vector_clock.tick();
+        OpID mark_id = { my_client_id, tick };
+        
+        Mark new_mark{mark_id, start_id, end_id, type, false};
+        marks[mark_id] = new_mark;
+    }
+    
+    void remoteMergeMark(const Mark& mark) {
+        clock.merge(mark.id.clock);
+        vector_clock.update(mark.id.client_id, mark.id.clock);
+        
+        auto it = marks.find(mark.id);
+        if (it == marks.end()) {
+            marks[mark.id] = mark;
+        } else {
+            if (mark.is_deleted) {
+                it->second.is_deleted = true;
+            }
+        }
+    }
+    
+    void removeMark(OpID mark_id) {
+        clock.tick();
+        vector_clock.tick();
+        auto it = marks.find(mark_id);
+        if (it != marks.end()) {
+            it->second.is_deleted = true;
+        }
+    }
+    
+    std::vector<Mark> getActiveMarks() const {
+        std::vector<Mark> active;
+        for (const auto& [id, mark] : marks) {
+            if (!mark.is_deleted) {
+                active.push_back(mark);
+            }
+        }
+        return active;
+    }
+    
+    std::vector<Mark> getAllMarks() const {
+        std::vector<Mark> all;
+        for (const auto& [id, mark] : marks) {
+            all.push_back(mark);
+        }
+        return all;
+    }
+
     /**
      * @brief SAVE TO STREAM (Binary format)
-     * Format: [MAGIC: "OMNI"] [VER: 2] [CLIENT_ID: 8b] [CLOCK: 8b] [VCLOCK] [COUNT: 8b] [ATOMS...]
+     * Format: [MAGIC: "OMNI"] [VER: 3] [CLIENT_ID: 8b] [CLOCK: 8b] [VCLOCK] [COUNT: 8b] [ATOMS...] [NUM_MARKS...] [MARKS...]
      */
     void save(std::ostream& out) const {
         // Header
         out.write("OMNI", 4);
-        uint8_t ver = 2; // Version bump for vector clock
+        uint8_t ver = 3; // Version bump for vector clock + marks
         out.write((char*)&ver, 1);
         
         // Metadata
@@ -776,6 +1000,23 @@ public:
             uint8_t del = atom.is_deleted ? 1 : 0;
             out.write((char*)&del, 1);
         }
+
+        // Save Marks
+        uint64_t num_marks = marks.size();
+        out.write((char*)&num_marks, sizeof(num_marks));
+        for (const auto& [id, mark] : marks) {
+            out.write((char*)&mark.id.client_id, 8);
+            out.write((char*)&mark.id.clock, 8);
+            out.write((char*)&mark.start_id.client_id, 8);
+            out.write((char*)&mark.start_id.clock, 8);
+            out.write((char*)&mark.end_id.client_id, 8);
+            out.write((char*)&mark.end_id.clock, 8);
+            uint32_t type_len = static_cast<uint32_t>(mark.type.size());
+            out.write((char*)&type_len, sizeof(type_len));
+            out.write(mark.type.data(), type_len);
+            uint8_t del = mark.is_deleted ? 1 : 0;
+            out.write((char*)&del, 1);
+        }
     }
 
     /**
@@ -789,12 +1030,15 @@ public:
 
         uint8_t ver;
         in.read((char*)&ver, 1);
-        if (ver != 1 && ver != 2) return false; // Support both versions
+        if (ver != 1 && ver != 2 && ver != 3) return false; // Support versions 1, 2, and 3
 
         atoms.clear();
         atom_index.clear();
         pending_orphans.clear();
         pending_deletes.clear();
+        marks.clear();
+        cached_string.clear();
+        cached_string_dirty = true;
         
         destroyTree(root);
         root = nullptr;
@@ -806,8 +1050,8 @@ public:
         in.read((char*)&clock_val, sizeof(clock_val));
         clock.merge(clock_val);
         
-        // Load vector clock if version 2
-        if (ver == 2) {
+        // Load vector clock if version 2 or 3
+        if (ver >= 2) {
             vector_clock.load(in);
         }
 
@@ -843,6 +1087,31 @@ public:
                 auto prev_it = std::prev(last_it);
                 AVLNode* prev_node = atom_index[prev_it->id];
                 insertNode(prev_node, new_node);
+            }
+        }
+
+        // Load marks if version 3
+        if (ver == 3) {
+            uint64_t num_marks = 0;
+            in.read((char*)&num_marks, sizeof(num_marks));
+            for (uint64_t i = 0; i < num_marks; i++) {
+                Mark mark;
+                in.read((char*)&mark.id.client_id, 8);
+                in.read((char*)&mark.id.clock, 8);
+                in.read((char*)&mark.start_id.client_id, 8);
+                in.read((char*)&mark.start_id.clock, 8);
+                in.read((char*)&mark.end_id.client_id, 8);
+                in.read((char*)&mark.end_id.clock, 8);
+                uint32_t type_len = 0;
+                in.read((char*)&type_len, sizeof(type_len));
+                mark.type.resize(type_len);
+                if (type_len > 0) {
+                    in.read(&mark.type[0], type_len);
+                }
+                uint8_t del = 0;
+                in.read((char*)&del, 1);
+                mark.is_deleted = (del == 1);
+                marks[mark.id] = mark;
             }
         }
 
