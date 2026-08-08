@@ -55,10 +55,10 @@ void test_stable_frontier() {
     
     // User 1 creates text
     for (int i = 0; i < 10; i++) {
-        Atom a = user1.localInsert(i, static_cast<char>('A' + i));
-        user2.remoteMerge(a);
-        user3.remoteMerge(a);
-    }
+    Atom a = user1.localInsert(i, static_cast<char>('A' + i));
+    user2.remoteMerge(a);
+    user3.remoteMerge(a);
+}
     
     // Update coordinator with all peer states
     gc_coord.updateMyVectorClock(user1.getVectorClock());
@@ -101,10 +101,16 @@ void test_coordinated_gc() {
     
     // Delete first 10
     for (int i = 0; i < 10; i++) {
-        OpID deleted = user1.localDelete(0);
-        user2.remoteDelete(deleted);
-        user3.remoteDelete(deleted);
-    }
+    OpID deleted = user1.localDelete(0);
+
+    const auto& delete_ops = user1.getDeleteOperationIds(deleted);
+    assert(!delete_ops.empty());
+
+    OpID delete_op = delete_ops.back();
+
+    user2.remoteDelete(deleted, delete_op);
+    user3.remoteDelete(deleted, delete_op);
+}
     
     assert(user1.getTombstoneCount() == 10);
     assert(user2.getTombstoneCount() == 10);
@@ -122,6 +128,15 @@ void test_coordinated_gc() {
     gc3.updateMyVectorClock(user3.getVectorClock());
     gc3.updatePeerState(1, user1.getVectorClock());
     gc3.updatePeerState(2, user2.getVectorClock());
+
+    std::cout << "GC1 frontier: "
+          << gc1.computeStableFrontier().get(1) << "\n";
+
+std::cout << "GC2 frontier: "
+          << gc2.computeStableFrontier().get(1) << "\n";
+
+std::cout << "GC3 frontier: "
+          << gc3.computeStableFrontier().get(1) << "\n";
     
     // Perform coordinated GC
     size_t r1 = gc1.performCoordinatedGC(user1);

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <functional> // for std::hash
+#include <vector>
 
 namespace omnisync {
 namespace core {
@@ -48,13 +49,14 @@ struct Atom {
     
     char content;     // The payload (e.g., 'A')
     bool is_deleted;  // If true, this is a "Tombstone" (Invisible, but kept for history)
+    std::vector<OpID> delete_operation_ids; // IDs of replicated delete operations
 
     // Constructor for convenience
     Atom(OpID _id, OpID _origin, char _content)
-        : id(_id), origin(_origin), content(_content), is_deleted(false) {}
+        : id(_id), origin(_origin), content(_content), is_deleted(false), delete_operation_ids(){}
         
     // Default constructor needed for some containers
-    Atom() : id({0,0}), origin({0,0}), content(0), is_deleted(true) {}
+    Atom() : id({0,0}), origin({0,0}), content(0), is_deleted(true), delete_operation_ids(){}
 };
 
 } // namespace core

@@ -66,10 +66,15 @@ void test_multi_user_gc() {
     // User 1 deletes first 10 chars
     std::vector<OpID> deletes;
     for (int i = 0; i < 10; i++) {
-        OpID deleted = user1.localDelete(0);
-        deletes.push_back(deleted);
-        user2.remoteDelete(deleted);
-        user3.remoteDelete(deleted);
+    OpID deleted = user1.localDelete(0);
+
+    const auto& delete_ops = user1.getDeleteOperationIds(deleted);
+    assert(!delete_ops.empty());
+
+    OpID delete_op = delete_ops.back();
+
+    user2.remoteDelete(deleted, delete_op);
+    user3.remoteDelete(deleted, delete_op);
     }
     
     assert(user1.toString() == user2.toString());
@@ -134,7 +139,11 @@ void test_gc_safety() {
     
     // Now user 2 receives the operations
     user2.remoteMerge(insert_atom);
-    user2.remoteDelete(deleted_id);
+
+    const auto& delete_ops = user1.getDeleteOperationIds(deleted_id);
+    assert(!delete_ops.empty());
+
+    user2.remoteDelete(deleted_id, delete_ops.back());
     
     // Both should converge
     assert(user1.toString() == user2.toString());

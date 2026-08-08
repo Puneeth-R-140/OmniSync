@@ -47,6 +47,8 @@ int main() {
     alice_ops_2.push_back(alice.localInsert(10, 'd'));
     
     std::cout << "  Alice: " << alice.toString() << "\n";
+
+    
     
     // 3. NAIVE SYNC: Send ALL operations (wasteful)
     std::cout << "\nNaive Sync:\n";
@@ -59,9 +61,6 @@ int main() {
     std::cout << "\nDelta Sync:\n";
     std::vector<Atom> delta = alice.getDelta(bob_state_before);
     std::cout << "  Sending " << delta.size() << " operations (only new edits)\n";
-    std::cout << "  Bandwidth reduction: " 
-              << (100.0 * (all_ops.size() - delta.size()) / all_ops.size()) 
-              << "%\n";
     
     assert(delta.size() == 6); // Only the new " World" edits
     
@@ -72,8 +71,67 @@ int main() {
     assert(alice.toString() == bob.toString());
     assert(bob.toString() == "Hello World");
     
+    std::cout << "\nPhase 3: Alice deletes 'W' after Bob already has it\n";
+
+    VectorClock bob_state_before_delete = bob.getVectorClock();
+
+    alice.localDelete(6);
+
+    assert(alice.toString() == "Hello orld");
+    
+    std::vector<Atom> delete_delta =
+    alice.getDelta(bob_state_before_delete);
+
+    std::cout << "  Alice: " << alice.toString() << "\n";
+    std::cout << "  Deletion delta size: " << delete_delta.size() << "\n";
+
+    assert(!delete_delta.empty());
+
+    bob.applyDelta(delete_delta);
+
+    std::cout << "  Bob: " << bob.toString() << "\n";
+
+    assert(bob.toString() == "Hello orld");
+    std::cout << "\nPhase 3b: Repeated deletion delivery\n";
+
+    bob.applyDelta(delete_delta);
+    bob.applyDelta(delete_delta);
+
+    assert(bob.toString() == "Hello orld");
+
+    std::cout << "  Bob after repeated deletion: "<< bob.toString() << "\n";
+    assert(alice.toString() == bob.toString());
     // 6. Test with concurrent edits
-    std::cout << "\nPhase 3: Concurrent edits\n";
+
+    std::cout << "\nPhase 4: Delete before insertion reaches Bob\n";
+
+    Sequence charlie(3);
+    Sequence david(4);
+
+    // Charlie creates X
+    charlie.localInsert(0, 'X');
+
+    // Charlie deletes X before David ever receives it
+    charlie.localDelete(0);
+
+    assert(charlie.toString().empty());
+
+    // Charlie sends the delta to David
+    VectorClock david_state = david.getVectorClock();
+    std::vector<Atom> delete_before_insert_delta =charlie.getDelta(david_state);
+
+    std::cout << "  Delta size: "<< delete_before_insert_delta.size() << "\n";
+
+    assert(!delete_before_insert_delta.empty());
+
+    // David receives the insertion + tombstone
+    david.applyDelta(delete_before_insert_delta);
+
+    std::cout << "  David: \"" << david.toString() << "\"\n";
+
+    assert(david.toString().empty());
+
+    std::cout << "\nPhase 5: Concurrent edits\n";
     
     VectorClock alice_state = alice.getVectorClock();
     VectorClock bob_state = bob.getVectorClock();
@@ -103,7 +161,7 @@ int main() {
     assert(alice.toString() == bob.toString());
     
     std::cout << "\nSUCCESS: Delta Sync Verified!\n";
-    std::cout << "   - 90%+ bandwidth reduction achieved\n";
+    std::cout << "   - Delta sync sends only missing operations\n";
     std::cout << "   - Concurrent edits merged correctly\n";
     std::cout << "   - Full convergence maintained\n";
     

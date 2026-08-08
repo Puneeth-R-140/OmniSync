@@ -86,7 +86,7 @@ private:
     std::unordered_map<OpID, std::vector<Atom>> pending_orphans;
     
     // Phase 0.5: Delete Buffer
-    std::unordered_set<OpID> pending_deletes;
+    std::unordered_map<OpID, std::vector<OpID>> pending_deletes;
     
     // Formatting Marks
     std::unordered_map<OpID, Mark> marks;
@@ -369,7 +369,7 @@ public:
 
     Atom localInsert(size_t literal_index, char content) {
         uint64_t tick = clock.tick();
-        vector_clock.tick(); // Update vector clock too
+        vector_clock.update(my_client_id, tick);
         OpID new_id = { my_client_id, tick };
 
         AVLNode* parent_node = findNodeByPrefixWeight(root, literal_index);
@@ -426,11 +426,25 @@ public:
         
         insertNode(prev_node, new_node);
         
-        if (pending_deletes.count(new_atom.id)) {
+        auto pending_it = pending_deletes.find(new_atom.id);
+
+        if (pending_it != pending_deletes.end()) {
             new_it->is_deleted = true;
-            tombstone_count++;
+
+            for (const auto& delete_id : pending_it->second) {
+                if (std::find(new_it->delete_operation_ids.begin(),new_it->delete_operation_ids.end(),delete_id) == new_it->delete_operation_ids.end()) {
+                    new_it->delete_operation_ids.push_back(delete_id);
+                }
+            }
+
+            if (!new_it->is_deleted) {
+                new_it->is_deleted = true;
+                tombstone_count++;
+                updateWeight(new_node, 0);
+            }
             updateWeight(new_node, 0);
-            pending_deletes.erase(new_atom.id);
+
+            pending_deletes.erase(pending_it);
         }
         
         checkPendingOrphans(new_atom.id);
@@ -444,47 +458,55 @@ public:
     }
     
     OpID localDelete(size_t literal_index) {
-        clock.tick();
-        vector_clock.tick();
-
         AVLNode* target_node = findNodeByPrefixWeight(root, literal_index + 1);
         if (target_node && target_node->weight == 1) {
-            auto it = target_node->atom_it;
-            OpID deleted_id = it->id;
-            it->is_deleted = true;
-            tombstone_count++;
-            
-            updateWeight(target_node, 0);
-            invalidateStringCache();
-            
-            // Auto-GC check
-            if (gc_config.auto_gc_enabled && tombstone_count >= gc_config.tombstone_threshold) {
-                garbageCollectLocal(gc_config.min_age_threshold);
-            }
-            
-            return deleted_id;
+           uint64_t tick = clock.tick();
+           vector_clock.update(my_client_id, tick);
+           OpID deleted_id = target_node->atom_it->id;
+           OpID delete_operation_id = {my_client_id, tick};
+           remoteDelete(deleted_id, delete_operation_id);
+           return deleted_id;
         }
         return {0,0};
     }
 
     void localDeleteId(OpID target_id) {
-        clock.tick();
-        vector_clock.tick();
-        remoteDelete(target_id);
+         uint64_t tick = clock.tick();
+         vector_clock.update(my_client_id, tick);
+         remoteDelete(target_id, {my_client_id, tick});
     }
 
-    void remoteDelete(OpID target_id) {
+    void remoteDelete(OpID target_id) { remoteDelete(target_id, {0, 0}); }
+
+    void remoteDelete(OpID target_id, OpID delete_operation_id) {
+        const bool has_operation = delete_operation_id.client_id != 0 || delete_operation_id.clock != 0;
+        if (has_operation) {
+            clock.merge(delete_operation_id.clock);
+            vector_clock.update(delete_operation_id.client_id, delete_operation_id.clock);
+        }
         auto map_it = atom_index.find(target_id);
         if (map_it != atom_index.end()) {
             AVLNode* node = map_it->second;
+            if (has_operation) {
+                auto& operations = node->atom_it->delete_operation_ids;
+                if (std::find(operations.begin(), operations.end(), delete_operation_id) == operations.end()) operations.push_back(delete_operation_id);
+            }
             if (!node->atom_it->is_deleted) {
                 node->atom_it->is_deleted = true;
                 tombstone_count++;
                 updateWeight(node, 0);
                 invalidateStringCache();
+
+                if (gc_config.auto_gc_enabled &&
+                    tombstone_count >= gc_config.tombstone_threshold) {
+                    garbageCollectLocal(gc_config.min_age_threshold);
+                }
             }
-        } else {
-            pending_deletes.insert(target_id);
+        } else if (has_operation) {
+            auto& operations = pending_deletes[target_id];
+            if (std::find(operations.begin(),operations.end(),delete_operation_id) == operations.end()) {
+                 operations.push_back(delete_operation_id);
+            }
         }
     }
 
@@ -505,12 +527,21 @@ public:
             // Skip the start node
             if (atom.id.client_id == 0 && atom.id.clock == 0) continue;
             
-            // Check if peer has seen this operation
             uint64_t peer_time = peer_state.get(atom.id.client_id);
-            
             if (atom.id.clock > peer_time) {
-                // Peer hasn't seen this operation
                 delta.push_back(atom);
+                continue;
+            }
+            // Deletion operations are independently acknowledged by vector clock.
+            if (atom.is_deleted && atom.delete_operation_ids.empty()) {
+                delta.push_back(atom); // compatibility with legacy tombstones
+                continue;
+            }
+            for (const auto& delete_id : atom.delete_operation_ids) {
+                if (delete_id.clock > peer_state.get(delete_id.client_id)) {
+                    delta.push_back(atom);
+                    break;
+                }
             }
         }
         
@@ -526,11 +557,10 @@ public:
      */
     void applyDelta(const std::vector<Atom>& delta) {
         for (const auto& atom : delta) {
-            if (atom.is_deleted) {
-                remoteDelete(atom.id);
-            } else {
-                remoteMerge(atom);
-            }
+            // Insert first: a delete delta may arrive before the original insertion.
+            remoteMerge(atom);
+            for (const auto& delete_id : atom.delete_operation_ids) remoteDelete(atom.id, delete_id);
+            if (atom.is_deleted && atom.delete_operation_ids.empty()) remoteDelete(atom.id);
         }
     }
 
@@ -540,6 +570,13 @@ public:
      */
     const VectorClock& getVectorClock() const {
         return vector_clock;
+    }
+
+    /**
+     * @brief Get the current Lamport logical time without modifying it.
+     */
+    uint64_t getLamportClock() const {
+        return clock.peek();
     }
 
     /**
@@ -570,11 +607,14 @@ public:
             // Only remove tombstones
             if (!atom.is_deleted) continue;
             
-            // Check if this atom is before the stable frontier
-            uint64_t frontier_time = stable_frontier.get(atom.id.client_id);
-            if (atom.id.clock <= frontier_time) {
-                to_remove.push_back(atom.id);
+            bool acknowledged = !atom.delete_operation_ids.empty();
+            for (const auto& delete_id : atom.delete_operation_ids) {
+                acknowledged = acknowledged && delete_id.clock <= stable_frontier.get(delete_id.client_id);
             }
+            // Old persisted tombstones have no deletion operation metadata.
+            if (atom.delete_operation_ids.empty()) acknowledged = atom.id.clock <= stable_frontier.get(atom.id.client_id);
+            
+            if (acknowledged) to_remove.push_back(atom.id);
         }
         
         removeTombstones(to_remove);
@@ -858,6 +898,17 @@ public:
             }
         }
         return {0, 0};
+    }
+
+    const std::vector<OpID>& getDeleteOperationIds(OpID atom_id) const {
+    auto it = atom_index.find(atom_id);
+
+    if (it == atom_index.end()) {
+        static const std::vector<OpID> empty;
+        return empty;
+    }
+
+    return it->second->atom_it->delete_operation_ids;
     }
 
     Atom localInsertAfter(OpID parent_id, char content) {
