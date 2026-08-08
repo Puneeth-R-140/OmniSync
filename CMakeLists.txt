@@ -75,6 +75,9 @@ if(OMNISYNC_BUILD_TESTS)
 
 	omnisync_add_exec(concurrent_robustness_test tests/concurrent_robustness_test.cpp)
 	add_test(NAME concurrent_robustness_test COMMAND concurrent_robustness_test)
+
+	omnisync_add_exec(omnisync_chaos_test tests/omnisync_chaos_test.cpp)
+	add_test(NAME omnisync_chaos_test COMMAND omnisync_chaos_test)
 endif()
 
 if(OMNISYNC_BUILD_EXAMPLES)
