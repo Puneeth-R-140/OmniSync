@@ -1,74 +1,88 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
-#include <string>
-#include <functional> // for std::hash
+#include <functional>
+#include <limits>
 #include <vector>
 
-namespace omnisync {
-namespace core {
+namespace omnisync::core {
 
 /**
- * @brief Unique Identifier for any Operation in the system.
- * Consists of (Who, When).
+ * @brief Globally unique operation identifier.
+ *
+ * clock is an HLC timestamp used for deterministic ordering.
+ * sequence is a per-client contiguous operation number used by the
+ * vector-clock/delta layer. Keeping these two concepts separate avoids
+ * using wall-clock time as a causal sequence number.
  */
 struct OpID {
-    uint64_t client_id; // Who wrote this? (Unique per device)
-    uint64_t clock;     // When? (Logical Lamport Timestamp)
+    uint64_t client_id = 0;
+    uint64_t clock = 0;
+    uint64_t sequence = 0;
 
-    // Standard Equality Operator
-    bool operator==(const OpID& other) const {
-        return clock == other.clock && client_id == other.client_id;
+    constexpr bool isNull() const noexcept {
+        return client_id == 0 && clock == 0 && sequence == 0;
     }
 
-    bool operator!=(const OpID& other) const {
-        return !(*this == other);
+    friend constexpr bool operator==(const OpID& a, const OpID& b) noexcept {
+        return a.client_id == b.client_id &&
+               a.clock == b.clock &&
+               a.sequence == b.sequence;
     }
 
-    /**
-     * @brief Sorting Rule (CRUCIAL for CRDTs)
-     * Defines the "Total Ordering" of events.
-     * 1. Check Clock (Older events first, newer events last).
-     * 2. If Clocks match, check ClientID (Arbitrary tie-breaker).
-     */
-    bool operator<(const OpID& other) const {
-        if (clock != other.clock) {
-            return clock < other.clock;
-        }
-        return client_id < other.client_id;
+    friend constexpr bool operator!=(const OpID& a, const OpID& b) noexcept {
+        return !(a == b);
+    }
+
+    /** Deterministic total order: HLC, client ID, then sequence. */
+    friend constexpr bool operator<(const OpID& a, const OpID& b) noexcept {
+        if (a.clock != b.clock) return a.clock < b.clock;
+        if (a.client_id != b.client_id) return a.client_id < b.client_id;
+        return a.sequence < b.sequence;
     }
 };
 
 /**
- * @brief The fundamental unit of the data structure (RGA Node).
- * Represents a single character insertion.
+ * @brief A single RGA sequence atom.
+ *
+ * The atom remains in the sequence after deletion so that its identity and
+ * ancestry can continue to resolve until distributed GC proves it is safe to
+ * remove. delete_operation_ids contains the idempotent delete operations that
+ * have been observed for this atom.
  */
 struct Atom {
-    OpID id;          // My unique ID
-    OpID origin;      // The ID of the Atom strictly to my LEFT (Parent)
-    
-    char content;     // The payload (e.g., 'A')
-    bool is_deleted;  // If true, this is a "Tombstone" (Invisible, but kept for history)
-    std::vector<OpID> delete_operation_ids; // IDs of replicated delete operations
+    OpID id;
+    OpID origin;                    // Stable RGA parent/left anchor.
+    char content = '\0';
+    bool is_deleted = false;
+    std::vector<OpID> delete_operation_ids;
 
-    // Constructor for convenience
-    Atom(OpID _id, OpID _origin, char _content)
-        : id(_id), origin(_origin), content(_content), is_deleted(false), delete_operation_ids(){}
-        
-    // Default constructor needed for some containers
-    Atom() : id({0,0}), origin({0,0}), content(0), is_deleted(true), delete_operation_ids(){}
+    Atom() = default;
+
+    Atom(OpID id_, OpID origin_, char content_)
+        : id(id_), origin(origin_), content(content_) {}
 };
 
-} // namespace core
-} // namespace omnisync
+} // namespace omnisync::core
 
-// Inject Hash Function into std namespace so we can use OpID as a Map Key
 namespace std {
-    template<>
-    struct hash<omnisync::core::OpID> {
-        size_t operator()(const omnisync::core::OpID& k) const {
-            // Simple hash combination
-            return std::hash<uint64_t>()(k.client_id) ^ (std::hash<uint64_t>()(k.clock) << 1);
-        }
-    };
-}
+template <>
+struct hash<omnisync::core::OpID> {
+    std::size_t operator()(const omnisync::core::OpID& value) const noexcept {
+        // SplitMix-style combination; unlike XOR this does not lose as much
+        // information when the fields have similar bit patterns.
+        auto mix = [](std::uint64_t x) noexcept {
+            x += 0x9e3779b97f4a7c15ULL;
+            x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+            x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+            return x ^ (x >> 31);
+        };
+
+        std::uint64_t h = mix(value.client_id);
+        h ^= mix(value.clock + 0x517cc1b727220a95ULL + (h << 6) + (h >> 2));
+        h ^= mix(value.sequence + 0x6eed0e9da4d94a4fULL + (h << 6) + (h >> 2));
+        return static_cast<std::size_t>(h);
+    }
+};
+} // namespace std

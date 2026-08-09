@@ -1,272 +1,178 @@
-#ifndef OMNISYNC_CORE_GC_COORDINATOR_HPP
-#define OMNISYNC_CORE_GC_COORDINATOR_HPP
+#pragma once
 
+#include <chrono>
+#include <cstdint>
+#include <functional>
+#include <stdexcept>
 #include <unordered_map>
 #include <vector>
-#include <chrono>
-#include <functional>
-#include "vector_clock.hpp"
+
 #include "sequence.hpp"
+#include "vector_clock.hpp"
 
 namespace omnisync::core {
 
-/**
- * @brief State tracking for a single peer in the distributed system
- */
+/** State remembered for one replication peer. */
 struct PeerState {
-    uint64_t peer_id;
+    uint64_t peer_id = 0;
     VectorClock vector_clock;
-    std::chrono::steady_clock::time_point last_seen;
-    bool is_active;
-    
-    PeerState(uint64_t id) 
-        : peer_id(id)
-        , last_seen(std::chrono::steady_clock::now())
-        , is_active(false) {}  // Not active until first update
+    std::chrono::steady_clock::time_point last_seen{};
+    bool is_active = false;
+    bool is_retired = false;
+
+    explicit PeerState(uint64_t id = 0)
+        : peer_id(id), vector_clock(id), last_seen(std::chrono::steady_clock::now()) {}
 };
 
 /**
- * @brief Coordinates garbage collection across multiple peers
- * 
- * The GCCoordinator tracks vector clocks from all known peers and computes
- * a safe "stable frontier" - the minimum vector clock across all active peers.
- * This frontier represents operations that ALL peers have witnessed, making
- * it safe to delete tombstones before this point.
- * 
- * Usage:
- * ```cpp
- * GCCoordinator gc_coord(my_peer_id);
- * 
- * // Register known peers
- * gc_coord.registerPeer(peer1_id);
- * gc_coord.registerPeer(peer2_id);
- * 
- * // Update their states as you receive operations
- * gc_coord.updatePeerState(peer1_id, their_vector_clock);
- * 
- * // Periodically check if GC should run
- * if (gc_coord.shouldTriggerGC()) {
- *     VectorClock frontier = gc_coord.computeStableFrontier();
- *     size_t removed = doc.garbageCollect(frontier);
- * }
- * ```
+ * @brief Computes a distributed GC frontier.
+ *
+ * A timeout is deliberately NOT treated as an acknowledgement. An offline
+ * peer may reconnect later with an old state, so silently excluding it would
+ * make tombstone collection unsafe. A peer leaves the GC quorum only through
+ * explicit retirePeer(), after the application has established that the peer
+ * will not return to the current document incarnation.
+ *
+ * Retired peers are never implicitly resurrected by heartbeat/update traffic.
+ * Re-registration is an explicit operation and resets the peer's causal state,
+ * requiring a fresh synchronization handshake before the peer participates in
+ * GC again.
  */
 class GCCoordinator {
 public:
-    /**
-     * @brief Configuration for GC coordination behavior
-     */
     struct Config {
-        uint64_t heartbeat_interval_ms = 5000;      // Send heartbeat every 5s
-        uint64_t peer_timeout_ms = 30000;           // Peer inactive after 30s
-        uint64_t gc_interval_ms = 60000;            // Run GC every 60s
-        bool auto_gc_enabled = true;                // Enable automatic GC
-        size_t min_peers_for_gc = 1;                // Minimum peers before GC
+        uint64_t heartbeat_interval_ms = 5000;
+        uint64_t peer_timeout_ms = 30000; // telemetry only; never a GC proof.
+        uint64_t gc_interval_ms = 60000;
+        bool auto_gc_enabled = true;
+        std::size_t min_peers_for_gc = 1;
     };
 
 private:
     uint64_t my_peer_id_;
-    Config config_;
+    Config config_{};
     std::unordered_map<uint64_t, PeerState> peers_;
-    std::chrono::steady_clock::time_point last_gc_time_;
+    std::chrono::steady_clock::time_point last_gc_time_ = std::chrono::steady_clock::now();
     VectorClock my_vector_clock_;
 
 public:
-    /**
-     * @brief Construct a GC coordinator
-     * @param my_peer_id This peer's unique identifier
-     * @param config Configuration options
-     */
     explicit GCCoordinator(uint64_t my_peer_id, const Config& config)
-        : my_peer_id_(my_peer_id)
-        , config_(config)
-        , last_gc_time_(std::chrono::steady_clock::now())
-        , my_vector_clock_(my_peer_id) {
-    }
-    
-    /**
-     * @brief Construct with default config
-     */
-    explicit GCCoordinator(uint64_t my_peer_id)
-        : GCCoordinator(my_peer_id, Config{}) {
+        : my_peer_id_(my_peer_id), config_(config), my_vector_clock_(my_peer_id) {
+        if (my_peer_id_ == 0) throw std::invalid_argument("peer ID 0 is reserved");
     }
 
-    /**
-     * @brief Register a new peer in the system
-     */
+    explicit GCCoordinator(uint64_t my_peer_id) : GCCoordinator(my_peer_id, Config{}) {}
+
+    /** Register a peer for the first time. Retired peers are not resurrected. */
     void registerPeer(uint64_t peer_id) {
-        if (peer_id == my_peer_id_) return;  // Don't register self
-        if (peers_.count(peer_id)) return;   // Already registered
-        
-        peers_.emplace(peer_id, PeerState(peer_id));
+        if (peer_id == 0 || peer_id == my_peer_id_) return;
+        peers_.try_emplace(peer_id, PeerState(peer_id));
     }
 
     /**
-     * @brief Update a peer's vector clock state
-     * @param peer_id The peer whose state to update
-     * @param vc Their current vector clock
+     * Explicitly reactivate a retired peer after a fresh synchronization
+     * handshake. The peer starts inactive and cannot affect GC until its
+     * current vector clock is supplied through updatePeerState().
      */
+    void reRegisterPeer(uint64_t peer_id) {
+        if (peer_id == 0 || peer_id == my_peer_id_) return;
+        auto [it, inserted] = peers_.try_emplace(peer_id, PeerState(peer_id));
+        if (inserted) return;
+        auto& state = it->second;
+        if (!state.is_retired) return;
+        state.vector_clock = VectorClock(peer_id);
+        state.last_seen = std::chrono::steady_clock::now();
+        state.is_active = false;
+        state.is_retired = false;
+    }
+
     void updatePeerState(uint64_t peer_id, const VectorClock& vc) {
+        if (peer_id == 0 || peer_id == my_peer_id_) return;
         auto it = peers_.find(peer_id);
         if (it == peers_.end()) {
-            // Auto-register unknown peers
             registerPeer(peer_id);
             it = peers_.find(peer_id);
         }
-        
-        it->second.vector_clock = vc;
-        it->second.last_seen = std::chrono::steady_clock::now();
-        it->second.is_active = true;
+        auto& state = it->second;
+        // Receiving traffic from a retired peer must never resurrect it.
+        if (state.is_retired) return;
+        state.vector_clock = vc;
+        state.last_seen = std::chrono::steady_clock::now();
+        state.is_active = true;
     }
 
-    /**
-     * @brief Mark a peer as disconnected
-     */
-    void removePeer(uint64_t peer_id) {
-        peers_.erase(peer_id);
+    void processHeartbeat(uint64_t peer_id, const VectorClock& vc) { updatePeerState(peer_id, vc); }
+
+    void retirePeer(uint64_t peer_id) {
+        if (peer_id == my_peer_id_) return;
+        auto it = peers_.find(peer_id);
+        if (it != peers_.end()) {
+            it->second.is_retired = true;
+            it->second.is_active = false;
+        }
     }
 
-    /**
-     * @brief Get list of currently active peers
-     */
+    // Kept for API compatibility. It means explicit retirement, not timeout.
+    void removePeer(uint64_t peer_id) { retirePeer(peer_id); }
+
     std::vector<PeerState> getActivePeers() const {
         std::vector<PeerState> active;
-        auto now = std::chrono::steady_clock::now();
-        
-        for (const auto& [id, state] : peers_) {
-            // Only count as active if:
-            // 1. Peer has been updated at least once (is_active)
-            // 2. Within timeout window
-            const uint64_t elapsed_ms = static_cast<uint64_t>(
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    now - state.last_seen).count());
-            
-            if (state.is_active && elapsed_ms < config_.peer_timeout_ms) {
-                active.push_back(state);
-            }
-        }
-        
+        for (const auto& [_, state] : peers_)
+            if (!state.is_retired && state.is_active) active.push_back(state);
         return active;
     }
 
-    /**
-     * @brief Compute the stable frontier across all active peers
-     * 
-     * The stable frontier is the minimum vector clock across all peers,
-     * representing operations that everyone has seen.
-     * 
-     * @return VectorClock representing the safe frontier for GC
-     */
-    VectorClock computeStableFrontier() const {
-        std::vector<VectorClock> all_clocks;
-        
-        // Include all active peer clocks
-        for (const auto& peer : getActivePeers()) {
-            all_clocks.push_back(peer.vector_clock);
-        }
-        
-        // Include own clock
-        all_clocks.push_back(my_vector_clock_);
-        
-        // If no active peers, return empty clock (no GC)
-        if (all_clocks.empty()) {
-            return VectorClock(my_peer_id_);
-        }
-        
-        // Compute minimum across all clocks
-        return VectorClock::computeMinimum(all_clocks);
+    std::vector<PeerState> getKnownPeers() const {
+        std::vector<PeerState> result;
+        for (const auto& [_, state] : peers_)
+            if (!state.is_retired) result.push_back(state);
+        return result;
     }
 
-    /**
-     * @brief Check if GC should be triggered based on time interval
-     */
-    bool shouldTriggerGC() const {
-        if (!config_.auto_gc_enabled) return false;
-        
-        auto now = std::chrono::steady_clock::now();
-        const uint64_t elapsed_ms = static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                now - last_gc_time_).count());
-        
-        // Check time interval
-        if (elapsed_ms < config_.gc_interval_ms) return false;
-        
-        // Check minimum peers requirement
-        if (getActivePeers().size() < config_.min_peers_for_gc) return false;
-        
+    /** Returns true only when every non-retired peer has supplied a state. */
+    bool hasCompleteQuorum() const {
+        if (getKnownPeers().size() < config_.min_peers_for_gc) return false;
+        for (const auto& [_, state] : peers_)
+            if (!state.is_retired && !state.is_active) return false;
         return true;
     }
 
-    /**
-     * @brief Perform coordinated GC on a document
-     * @param doc The document to garbage collect
-     * @return Number of tombstones removed
-     */
-    size_t performCoordinatedGC(Sequence& doc) {
-        VectorClock frontier = computeStableFrontier();
-        size_t removed = doc.garbageCollect(frontier);
-        
-        // Update last GC time
+    VectorClock computeStableFrontier() const {
+        std::vector<VectorClock> clocks;
+        clocks.reserve(peers_.size() + 1);
+        clocks.push_back(my_vector_clock_);
+        for (const auto& [_, state] : peers_)
+            if (!state.is_retired) clocks.push_back(state.vector_clock);
+        return VectorClock::computeMinimum(clocks);
+    }
+
+    bool shouldTriggerGC() const {
+        if (!config_.auto_gc_enabled || !hasCompleteQuorum()) return false;
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - last_gc_time_).count();
+        return elapsed >= static_cast<long long>(config_.gc_interval_ms);
+    }
+
+    std::size_t performCoordinatedGC(Sequence& doc) {
+        if (!hasCompleteQuorum()) return 0;
+        const auto frontier = computeStableFrontier();
+        const std::size_t removed = doc.garbageCollect(frontier);
         last_gc_time_ = std::chrono::steady_clock::now();
-        
         return removed;
     }
 
-    /**
-     * @brief Update own vector clock (call after local operations)
-     */
-    void updateMyVectorClock(const VectorClock& vc) {
-        my_vector_clock_ = vc;
-    }
+    void updateMyVectorClock(const VectorClock& vc) { my_vector_clock_ = vc; }
+    const VectorClock& getMyVectorClock() const noexcept { return my_vector_clock_; }
+    const Config& getConfig() const noexcept { return config_; }
+    void setConfig(const Config& config) { config_ = config; }
+    std::size_t getPeerCount() const noexcept { return peers_.size(); }
+    std::size_t getActivePeerCount() const { return getActivePeers().size(); }
 
-    /**
-     * @brief Get current configuration
-     */
-    const Config& getConfig() const {
-        return config_;
-    }
-
-    /**
-     * @brief Update configuration
-     */
-    void setConfig(const Config& config) {
-        config_ = config;
-    }
-
-    /**
-     * @brief Get number of registered peers
-     */
-    size_t getPeerCount() const {
-        return peers_.size();
-    }
-
-    /**
-     * @brief Get number of active peers (within timeout)
-     */
-    size_t getActivePeerCount() const {
-        return getActivePeers().size();
-    }
-
-    /**
-     * @brief Send heartbeat to all peers
-     * 
-     * @param send_fn Callback to send vector clock to a peer
-     *                Arguments: (peer_id, my_vector_clock)
-     */
-    void sendHeartbeat(std::function<void(uint64_t, const VectorClock&)> send_fn) {
-        for (const auto& [peer_id, state] : peers_) {
-            send_fn(peer_id, my_vector_clock_);
-        }
-    }
-
-    /**
-     * @brief Process incoming heartbeat from a peer
-     */
-    void processHeartbeat(uint64_t peer_id, const VectorClock& vc) {
-        updatePeerState(peer_id, vc);
+    void sendHeartbeat(std::function<void(uint64_t, const VectorClock&)> send_fn) const {
+        if (!send_fn) return;
+        for (const auto& [peer_id, state] : peers_)
+            if (!state.is_retired) send_fn(peer_id, my_vector_clock_);
     }
 };
 
 } // namespace omnisync::core
-
-#endif // OMNISYNC_CORE_GC_COORDINATOR_HPP

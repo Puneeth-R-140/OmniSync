@@ -1,28 +1,41 @@
-# Build Artifacts
+# Build artifacts
 build/
-bin/
 *.exe
-*.o
-*.lib
-*.dll
-*.a
+.o
+*.os
 
-
-# IDE Settings
+# IDE
 .vscode/
-.idea/
-*.swp
+.vs/
 
-# OS Files
-.DS_Store
-Thumbs.db
+# Node
+node_modules/
 
-# Documentation (private planning)
-ROADMAP.md
-notes/
+# Generated test/benchmark results
+*_results_*.csv
+*_results_*.txt
 
-# Generated test result files
+# Build output
+build/
+out/
+cmake-build-*/
+
+# Visual Studio
+.vs/
+*.vcxproj.user
+*.suo
+
+# Node dependencies / generated benchmark artifacts
+benchmarks/node_modules/
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test/stress generated output
+*_results_*.txt
+*_results_*.csv
 test_results_*.txt
-stability_test_results.csv
-save_test.os
-bad_*.os
+
+# Coverage
+coverage/

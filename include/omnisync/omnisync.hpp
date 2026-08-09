@@ -1,45 +1,32 @@
-#ifndef OMNISYNC_HPP
-#define OMNISYNC_HPP
+#pragma once
 
-/*
- *  ___                _  _____                 
- * / _ \ _ __ ___  _ __(_)___  /_   _ _ __   ___ 
- *| | | | '_ ` _ \| '_ \| / __|| | | | '_ \ / __|
- *| |_| | | | | | | | | | \__ \| |_| | | | | (__ 
- * \___/|_| |_| |_|_| |_|_|___(_)__, |_| |_|\___|
- *                               |___/           
- * 
+/**
  * OmniSync: A C++17 Header-Only CRDT Library
  * Copyright (c) 2026 Puneeth R
  * Licensed under the MIT License
- * 
- * Performance:
- * - Delta Sync:     90% bandwidth reduction
- * - VLE Encoding:   82% size reduction  
- * - Combined:       98% total bandwidth reduction (56x smaller!)
- * - Avg atom size:  6 bytes (vs 34 bytes)
+ *
+ * Public umbrella header for the CRDT core and networking interfaces.
+ * Performance characteristics are workload-dependent and are established by
+ * the benchmark suite rather than treated as API guarantees.
  */
 
-// Core Components
 #include "core/crdt_atom.hpp"
 #include "core/lamport_clock.hpp"
 #include "core/vector_clock.hpp"
+#include "core/memory_stats.hpp"
 #include "core/sequence.hpp"
 #include "core/gc_coordinator.hpp"
 
-// Network Helpers
 #include "network/vle_encoding.hpp"
 #include "network/binary_packer.hpp"
 #include "network/udp_socket.hpp"
 
 namespace omnisync {
-    // Official Release Version
-    constexpr int VERSION_MAJOR = 1;
-    constexpr int VERSION_MINOR = 4;
-    constexpr int VERSION_PATCH = 0;
 
-    static const char* VERSION_STRING = "1.4.0";
-    static const char* VERSION_NAME = "Stability Master";
-}
+inline constexpr int VERSION_MAJOR = 0;
+inline constexpr int VERSION_MINOR = 0;
+inline constexpr int VERSION_PATCH = 0;
+inline constexpr const char VERSION_STRING[] = "0.0.5-dev";
+inline constexpr const char VERSION_NAME[] = "Development";
 
-#endif // OMNISYNC_HPP
+} // namespace omnisync
